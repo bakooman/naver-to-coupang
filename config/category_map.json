@@ -1,0 +1,1019 @@
+{
+  "_comment": [
+    "키워드 → 쿠팡 카테고리 자동 매핑 설정파일",
+    "키워드가 상품명에 포함되면 해당 category_id + gosisi_cat 자동 부여",
+    "priority: 높을수록 우선 (동시에 여러 키워드 매칭 시 우선순위 높은 것 선택)",
+    "category_id 비워두면 엑셀에 빈칸으로 기입됨 (Wing에서 수동 선택 필요)",
+    "",
+    "category_id 찾는 법:",
+    "  Wing → 상품 → 일괄등록 → 양식다운 → 카테고리 선택 후 ID 확인",
+    "  또는 Wing 상품등록 페이지에서 카테고리 선택 시 URL에 표시"
+  ],
+  "keywords": {
+    "── 자동차 ────────────────────────────────────────────────": {},
+    "엔진오일세트": {
+      "category_id": "113070",
+      "gosisi_cat": "자동차용품",
+      "priority": 25
+    },
+    "오일세트": {
+      "category_id": "113070",
+      "gosisi_cat": "자동차용품",
+      "priority": 25
+    },
+    "필터세트": {
+      "category_id": "113070",
+      "gosisi_cat": "자동차용품",
+      "priority": 25
+    },
+    "엔진오일 세트": {
+      "category_id": "113070",
+      "gosisi_cat": "자동차용품",
+      "priority": 25
+    },
+    "엔진오일필터": {
+      "category_id": "78897",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "엔진오일교환용": {
+      "category_id": "78897",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "엔진오일교환키트": {
+      "category_id": "78897",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "엔진오일": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 15
+    },
+    "오일필터": {
+      "category_id": "78897",
+      "gosisi_cat": "자동차용품",
+      "priority": 12
+    },
+    "에어필터": {
+      "category_id": "78893",
+      "gosisi_cat": "자동차용품",
+      "priority": 12
+    },
+    "부동액": {
+      "category_id": "78903",
+      "gosisi_cat": "자동차용품",
+      "priority": 12
+    },
+    "냉각수": {
+      "category_id": "78903",
+      "gosisi_cat": "자동차용품",
+      "priority": 12
+    },
+    "브레이크오일": {
+      "category_id": "78894",
+      "gosisi_cat": "자동차용품",
+      "priority": 13
+    },
+    "기어오일": {
+      "category_id": "78895",
+      "gosisi_cat": "자동차용품",
+      "priority": 13
+    },
+    "미션오일": {
+      "category_id": "78892",
+      "gosisi_cat": "자동차용품",
+      "priority": 19
+    },
+    "자동미션": {
+      "category_id": "78892",
+      "gosisi_cat": "자동차용품",
+      "priority": 22
+    },
+    "트랜스미션오일": {
+      "category_id": "78892",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "ATF": {
+      "category_id": "78892",
+      "gosisi_cat": "자동차용품",
+      "priority": 14
+    },
+    "에어컨필터": {
+      "category_id": "78814",
+      "gosisi_cat": "자동차용품",
+      "priority": 14
+    },
+    "향균필터": {
+      "category_id": "78814",
+      "gosisi_cat": "자동차용품",
+      "priority": 13
+    },
+    "워셔액": {
+      "category_id": "78770",
+      "gosisi_cat": "자동차용품",
+      "priority": 12
+    },
+    "컴파운드": {
+      "category_id": "78783",
+      "gosisi_cat": "자동차용품",
+      "priority": 14
+    },
+    "연료첨가제": {
+      "category_id": "78899",
+      "gosisi_cat": "자동차용품",
+      "priority": 16
+    },
+    "연료 첨가제": {
+      "category_id": "78899",
+      "gosisi_cat": "자동차용품",
+      "priority": 17
+    },
+    "엔진첨가제": {
+      "category_id": "78900",
+      "gosisi_cat": "자동차용품",
+      "priority": 16
+    },
+    "엔진 첨가제": {
+      "category_id": "78900",
+      "gosisi_cat": "자동차용품",
+      "priority": 17
+    },
+    "냉각수첨가제": {
+      "category_id": "78901",
+      "gosisi_cat": "자동차용품",
+      "priority": 15
+    },
+    "미션첨가제": {
+      "category_id": "78902",
+      "gosisi_cat": "자동차용품",
+      "priority": 15
+    },
+    "요소수": {
+      "category_id": "112318",
+      "gosisi_cat": "자동차용품",
+      "priority": 15
+    },
+    "── 자동차 > 엔진오일 SAE점도 (상품명에 엔진오일 없어도 자동감지) ──": {},
+    "0W16": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "0W20": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "0W30": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "0W40": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "5W20": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "5W30": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "5W40": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "5W50": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 20
+    },
+    "10W30": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 19
+    },
+    "10W40": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 19
+    },
+    "10W60": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 19
+    },
+    "15W40": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 19
+    },
+    "20W50": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 19
+    },
+    "── 자동차 > 엔진오일 타입/규격 ────────────────────────────": {},
+    "합성유": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 17
+    },
+    "반합성유": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "전합성유": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "PAO기유": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 19
+    },
+    "SP규격": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "SN규격": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "SM규격": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "가솔린전용": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "디젤전용": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "휘발유전용": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 18
+    },
+    "가솔린디젤": {
+      "category_id": "78889",
+      "gosisi_cat": "자동차용품",
+      "priority": 17
+    },
+    "── 뷰티 > 향수 ──────────────────────────────────────────": {},
+    "오드퍼퓸": {
+      "category_id": "56639",
+      "gosisi_cat": "화장품",
+      "priority": 20
+    },
+    "오드뚜왈렛": {
+      "category_id": "56638",
+      "gosisi_cat": "화장품",
+      "priority": 20
+    },
+    "오드코롱": {
+      "category_id": "56637",
+      "gosisi_cat": "화장품",
+      "priority": 20
+    },
+    "퍼퓸": {
+      "category_id": "56640",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "향수": {
+      "category_id": "56639",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "── 뷰티 > 헤어 ──────────────────────────────────────────": {},
+    "샴푸": {
+      "category_id": "56280",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "린스": {
+      "category_id": "56304",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "컨디셔너": {
+      "category_id": "56304",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "트리트먼트": {
+      "category_id": "56322",
+      "gosisi_cat": "화장품",
+      "priority": 14
+    },
+    "헤어에센스": {
+      "category_id": "56341",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "헤어오일": {
+      "category_id": "56347",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "헤어왁스": {
+      "category_id": "56358",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "헤어스프레이": {
+      "category_id": "56368",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "── 뷰티 > 스킨케어 ──────────────────────────────────────": {},
+    "세럼": {
+      "category_id": "56171",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "앰플": {
+      "category_id": "56172",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "마스크팩": {
+      "category_id": "56184",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "클렌징폼": {
+      "category_id": "56122",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "클렌징": {
+      "category_id": "56122",
+      "gosisi_cat": "화장품",
+      "priority": 12
+    },
+    "선크림": {
+      "category_id": "56196",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "선블록": {
+      "category_id": "56196",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "토너": {
+      "category_id": "56158",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "스킨/토너": {
+      "category_id": "56158",
+      "gosisi_cat": "화장품",
+      "priority": 17
+    },
+    "화장수": {
+      "category_id": "56158",
+      "gosisi_cat": "화장품",
+      "priority": 14
+    },
+    "로션": {
+      "category_id": "56161",
+      "gosisi_cat": "화장품",
+      "priority": 13
+    },
+    "에멀젼": {
+      "category_id": "56161",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "수분크림": {
+      "category_id": "56163",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "아이크림": {
+      "category_id": "56168",
+      "gosisi_cat": "화장품",
+      "priority": 17
+    },
+    "나이트크림": {
+      "category_id": "56166",
+      "gosisi_cat": "화장품",
+      "priority": 17
+    },
+    "넥크림": {
+      "category_id": "56169",
+      "gosisi_cat": "화장품",
+      "priority": 17
+    },
+    "미스트": {
+      "category_id": "56160",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "바디미스트": {
+      "category_id": "56160",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "바디스프레이": {
+      "category_id": "56160",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "── 뷰티 > 바디케어 ──────────────────────────────────────": {},
+    "바디워시": {
+      "category_id": "56213",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "샤워젤": {
+      "category_id": "56213",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "보디워시": {
+      "category_id": "56213",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "바디클렌저": {
+      "category_id": "56213",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "바디로션": {
+      "category_id": "56222",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "바디크림": {
+      "category_id": "56223",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "핸드크림": {
+      "category_id": "56236",
+      "gosisi_cat": "화장품",
+      "priority": 16
+    },
+    "데오드란트": {
+      "category_id": "56270",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "── 식품 > 라면/면류 ─────────────────────────────────────": {},
+    "컵라면": {
+      "category_id": "58647",
+      "gosisi_cat": "가공식품",
+      "priority": 18
+    },
+    "라면": {
+      "category_id": "58646",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "── 식품 > 과자/스낵 ─────────────────────────────────────": {},
+    "비스킷": {
+      "category_id": "59629",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "쿠키": {
+      "category_id": "72995",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "초콜릿": {
+      "category_id": "110808",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "사탕": {
+      "category_id": "72928",
+      "gosisi_cat": "가공식품",
+      "priority": 13
+    },
+    "젤리": {
+      "category_id": "72929",
+      "gosisi_cat": "가공식품",
+      "priority": 13
+    },
+    "스낵": {
+      "category_id": "72900",
+      "gosisi_cat": "가공식품",
+      "priority": 12
+    },
+    "과자": {
+      "category_id": "59628",
+      "gosisi_cat": "가공식품",
+      "priority": 12
+    },
+    "파이": {
+      "category_id": "59635",
+      "gosisi_cat": "가공식품",
+      "priority": 13
+    },
+    "시리얼": {
+      "category_id": "59655",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "── 식품 > 음료/생수 ─────────────────────────────────────": {},
+    "탄산음료": {
+      "category_id": "58768",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "생수": {
+      "category_id": "58759",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "탄산수": {
+      "category_id": "58762",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "── 식품 > 통조림 ───────────────────────────────────────": {},
+    "통조림": {
+      "category_id": "58566",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "참치캔": {
+      "category_id": "58555",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "참치": {
+      "category_id": "58555",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "── 생활용품 > 욕실 ──────────────────────────────────────────": {},
+    "스텐레스비누": {
+      "category_id": "64492",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "스테인리스비누": {
+      "category_id": "64492",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "냄새제거비누": {
+      "category_id": "64492",
+      "gosisi_cat": "기타 재화",
+      "priority": 28
+    },
+    "── 주방 > 커피용품 ──────────────────────────────────────────": {},
+    "석회제거제": {
+      "category_id": "80821",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "커피머신세정제": {
+      "category_id": "80821",
+      "gosisi_cat": "기타 재화",
+      "priority": 28
+    },
+    "디스케일러": {
+      "category_id": "80821",
+      "gosisi_cat": "기타 재화",
+      "priority": 28
+    },
+    "── 가전 > 커피메이커/머신 ──────────────────────────────────": {},
+    "커피그라인더": {
+      "category_id": "63726",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "원두분쇄기": {
+      "category_id": "63726",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "커피머신": {
+      "category_id": "63723",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "에스프레소머신": {
+      "category_id": "63723",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "캡슐커피머신": {
+      "category_id": "63721",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "커피메이커": {
+      "category_id": "63722",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "── 식품 > 커피 ──────────────────────────────────────────": {},
+    "원두커피": {
+      "category_id": "72849",
+      "gosisi_cat": "가공식품",
+      "priority": 17
+    },
+    "원두": {
+      "category_id": "72849",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "분쇄커피": {
+      "category_id": "72850",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "캡슐커피": {
+      "category_id": "58857",
+      "gosisi_cat": "가공식품",
+      "priority": 17
+    },
+    "커피믹스": {
+      "category_id": "72831",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "커피음료": {
+      "category_id": "58795",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "커피": {
+      "category_id": "72849",
+      "gosisi_cat": "가공식품",
+      "priority": 12
+    },
+    "── 식품 > 소스/조미료 ───────────────────────────────────────": {},
+    "케첩": {
+      "category_id": "58476",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "마요네즈": {
+      "category_id": "58477",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "돈까스소스": {
+      "category_id": "58482",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "스테이크소스": {
+      "category_id": "58483",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "바베큐소스": {
+      "category_id": "58483",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "핫소스": {
+      "category_id": "59866",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "굴소스": {
+      "category_id": "72979",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "불고기양념": {
+      "category_id": "72981",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "갈비양념": {
+      "category_id": "72981",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "파스타소스": {
+      "category_id": "59196",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "토마토소스": {
+      "category_id": "59083",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "머스타드": {
+      "category_id": "58479",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "드레싱": {
+      "category_id": "73004",
+      "gosisi_cat": "가공식품",
+      "priority": 13
+    },
+    "올리고당": {
+      "category_id": "73016",
+      "gosisi_cat": "가공식품",
+      "priority": 14
+    },
+    "── 식품 > 식용유/오일 ───────────────────────────────────────": {},
+    "엑스트라버진올리브오일": {
+      "category_id": "73021",
+      "gosisi_cat": "가공식품",
+      "priority": 20
+    },
+    "엑스트라버진 올리브오일": {
+      "category_id": "73021",
+      "gosisi_cat": "가공식품",
+      "priority": 20
+    },
+    "올리브오일": {
+      "category_id": "73021",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "올리브유": {
+      "category_id": "73021",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "포도씨유": {
+      "category_id": "73024",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "아보카도오일": {
+      "category_id": "73028",
+      "gosisi_cat": "가공식품",
+      "priority": 17
+    },
+    "코코넛오일": {
+      "category_id": "73028",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "── 건강기능식품 ────────────────────────────────────────": {},
+    "오메가3": {
+      "category_id": "73134",
+      "gosisi_cat": "건강기능식품",
+      "priority": 16
+    },
+    "비타민": {
+      "category_id": "58913",
+      "gosisi_cat": "건강기능식품",
+      "priority": 14
+    },
+    "유산균": {
+      "category_id": "58991",
+      "gosisi_cat": "건강기능식품",
+      "priority": 15
+    },
+    "프로바이오틱스": {
+      "category_id": "58991",
+      "gosisi_cat": "건강기능식품",
+      "priority": 16
+    },
+    "루테인": {
+      "category_id": "58920",
+      "gosisi_cat": "건강기능식품",
+      "priority": 15
+    },
+    "콜라겐": {
+      "category_id": "59163",
+      "gosisi_cat": "건강기능식품",
+      "priority": 14
+    },
+    "파워스티어링오일": {
+      "category_id": "78903",
+      "gosisi_cat": "자동차용품",
+      "priority": 30
+    },
+    "파워스티어링 오일": {
+      "category_id": "78903",
+      "gosisi_cat": "자동차용품",
+      "priority": 30
+    },
+    "PSF": {
+      "category_id": "78903",
+      "gosisi_cat": "자동차용품",
+      "priority": 25
+    },
+    "파워오일": {
+      "category_id": "78903",
+      "gosisi_cat": "자동차용품",
+      "priority": 25
+    },
+    "스티어링오일": {
+      "category_id": "78903",
+      "gosisi_cat": "자동차용품",
+      "priority": 25
+    },
+    "페이스크림": {
+      "category_id": "56249",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "보습크림": {
+      "category_id": "56249",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "영양크림": {
+      "category_id": "56249",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "페이스오일": {
+      "category_id": "56173",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "세안비누": {
+      "category_id": "56179",
+      "gosisi_cat": "화장품",
+      "priority": 18
+    },
+    "비누": {
+      "category_id": "56179",
+      "gosisi_cat": "화장품",
+      "priority": 15
+    },
+    "크림": {
+      "category_id": "56249",
+      "gosisi_cat": "화장품",
+      "priority": 12
+    },
+    "도시락통": {
+      "category_id": "80609",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 20
+    },
+    "간식통": {
+      "category_id": "80609",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 20
+    },
+    "찬합": {
+      "category_id": "80610",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 18
+    },
+    "── 주방 > 컵/잔/텀블러 ──────────────────────────────────────────": {},
+    "위스키 텀블러": {
+      "category_id": "80552",
+      "gosisi_cat": "기타 재화",
+      "priority": 22
+    },
+    "위스키텀블러": {
+      "category_id": "80552",
+      "gosisi_cat": "기타 재화",
+      "priority": 22
+    },
+    "위스키잔": {
+      "category_id": "80552",
+      "gosisi_cat": "기타 재화",
+      "priority": 20
+    },
+    "언더락": {
+      "category_id": "80552",
+      "gosisi_cat": "기타 재화",
+      "priority": 20
+    },
+    "양주잔": {
+      "category_id": "80552",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "칵테일잔": {
+      "category_id": "80553",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "맥주잔": {
+      "category_id": "80545",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "소주잔": {
+      "category_id": "80546",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "와인잔": {
+      "category_id": "80548",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "샴페인잔": {
+      "category_id": "80549",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "보온텀블러": {
+      "category_id": "80534",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "보냉텀블러": {
+      "category_id": "80534",
+      "gosisi_cat": "기타 재화",
+      "priority": 18
+    },
+    "보온/보냉텀블러": {
+      "category_id": "80534",
+      "gosisi_cat": "기타 재화",
+      "priority": 20
+    },
+    "머그컵": {
+      "category_id": "80530",
+      "gosisi_cat": "기타 재화",
+      "priority": 16
+    },
+    "텀블러": {
+      "category_id": "80535",
+      "gosisi_cat": "기타 재화",
+      "priority": 10
+    },
+    "유리컵": {
+      "category_id": "80529",
+      "gosisi_cat": "기타 재화",
+      "priority": 14
+    },
+    "물컵": {
+      "category_id": "80529",
+      "gosisi_cat": "기타 재화",
+      "priority": 12
+    },
+    "── 가전 > 정수기 필터/액세서리 ────────────────────────────": {},
+    "정수기필터": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 30
+    },
+    "정수기 필터": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 30
+    },
+    "정수기교환필터": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 32
+    },
+    "정수기 교환필터": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 32
+    },
+    "교환필터": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "정수기주변기기": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "정수기헤드": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "필터헤드": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    },
+    "냉온수기필터": {
+      "category_id": "63714",
+      "gosisi_cat": "가정용 전기제품(냉장고/세탁기 등)",
+      "priority": 28
+    }
+  }
+}

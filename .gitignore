@@ -1,0 +1,44 @@
+# 민감한 파일 - 절대 올리면 안됨
+.env
+ssh_keys/
+data/wing_session*.json
+
+# 대용량/불필요 데이터 파일
+data/
+coupang_data.json
+
+# 백업/임시 파일
+*.bak*
+*.bak_*
+*.txt
+analyze*.py
+debug_*.py
+check_*.py
+test_*.py
+query_*.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+
+# 로그
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
