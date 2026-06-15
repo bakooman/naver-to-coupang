@@ -1,4 +1,4 @@
-"""
+﻿"""
 Wing(wing.coupang.com) 브라우저 자동화
 - URL: /tenants/seller-web/vendor-inventory/modify?vendorInventoryId={id}
 - 주요 기능: 자동가격조정 최저가·설정가격 입력, 개당 용량 설정
@@ -2531,9 +2531,39 @@ class WingAutomator:
                 #  3) 3초 대기 후 최종 에러 확인 → 성공/실패 판정
                 # ══════════════════════════════════════════════════════
 
+                # ─ JS: 로켓그로스 팝업 전용 처리 ──────────────────────────
+                # 상품등록 클릭 후 뜨는 "판매 방식 선택" 팝업 (에러가 아님!).
+                # 판매자배송 선택 후 확인 클릭 → 판매방식 저장. 그 후 상품등록 재클릭 필요.
+                _JS_HANDLE_RG_POPUP = """
+                    () => {
+                        for (const btn of document.querySelectorAll('button')) {
+                            if (!btn.offsetParent) continue;
+                            const t = btn.textContent.trim();
+                            if (t !== '확인' && t !== '닫기') continue;
+                            let p = btn.parentElement;
+                            for (let d = 0; d < 10 && p && p !== document.body; d++) {
+                                if (p.textContent.includes('로켓그로스') &&
+                                    (p.textContent.includes('판매방식') ||
+                                     p.textContent.includes('판매 방식'))) {
+                                    /* 판매자배송 선택 */
+                                    for (const el of p.querySelectorAll('button, label, input[type="radio"]')) {
+                                        if (!el.offsetParent) continue;
+                                        const et = (el.textContent || el.getAttribute('value') || '').trim();
+                                        if (et === '판매자배송') { el.click(); break; }
+                                    }
+                                    btn.click();
+                                    return p.textContent.replace(/\s+/g,' ').trim().substring(0, 80);
+                                }
+                                p = p.parentElement;
+                            }
+                        }
+                        return '';
+                    }
+                """
+
                 # ─ JS: 에러 팝업 감지 & 확인 버튼 즉시 클릭 ─────────────
-                # DOM 트리를 역방향으로 탐색해 에러 문맥 안의 확인 버튼을 클릭.
-                # 클래스명 불문, 텍스트로만 판별 → Wing 클래스 변경에 무관
+                # 로켓그로스 팝업은 전용 핸들러(_JS_HANDLE_RG_POPUP)에서 처리.
+                # 여기서는 로켓그로스 팝업을 명시적으로 제외.
                 _JS_DISMISS_ERR = """
                     () => {
                         const ERR_KW = [
@@ -2544,17 +2574,14 @@ class WingAutomator:
                             if (!btn.offsetParent) continue;
                             const t = btn.textContent.trim();
                             if (t !== '확인' && t !== '닫기') continue;
-                            /* 부모 체인(최대 8단계)에서 에러 텍스트 포함 컨테이너 탐색 */
                             let p = btn.parentElement;
                             for (let d = 0; d < 8 && p && p !== document.body; d++) {
                                 if (ERR_KW.some(k => p.textContent.includes(k))) {
-                                    /* 로켓그로스 팝업이면 판매자배송 먼저 선택 */
-                                    if (p.textContent.includes('로켓그로스')) {
-                                        for (const el of p.querySelectorAll('button, label, input[type="radio"]')) {
-                                            if (!el.offsetParent) continue;
-                                            const et = (el.textContent || el.getAttribute('value') || '').trim();
-                                            if (et === '판매자배송') { el.click(); break; }
-                                        }
+                                    /* 로켓그로스 팝업은 전용 핸들러에서 처리 — 여기서 제외 */
+                                    if (p.textContent.includes('로켓그로스') &&
+                                        (p.textContent.includes('판매방식') ||
+                                         p.textContent.includes('판매 방식'))) {
+                                        break;
                                     }
                                     const msg = p.textContent.replace(/\s+/g,' ').trim().substring(0, 120);
                                     btn.click();
@@ -2628,56 +2655,100 @@ class WingAutomator:
                     }
                 """
 
-                # ── Step 1: 에러 팝업 / 확인 팝업 빠른 감지 (0.3s 폴링, 최대 3s) ──
-                _err_first = False   # 에러 팝업이 먼저 떴으면 True
-                _skip_item = False   # 이 상품 건너뜀 플래그
+                # ── Step 1: 팝업 감지 폴링 (0.3s 간격, 최대 4.5s) ─────────────────
+                # 우선순위: ① 로켓그로스 팝업(비에러) → ② 에러 팝업 → ③ 등록 확인 팝업
+                _rg_count = 0         # 로켓그로스 팝업 처리 횟수
+                _skip_item = False    # 이 상품 건너뜀 플래그
+                _registered_by_confirm = False  # 등록 확인 팝업 클릭 성공 여부
 
-                for _pw in range(10):   # 0.3s × 10 = 3초
+                for _pw in range(15):   # 0.3s × 15 = 4.5초
                     await asyncio.sleep(0.3)
-                    # ① 에러 팝업 우선 확인
+                    # ① 로켓그로스 판매방식 선택 팝업 전용 처리 (에러 아님)
+                    _rg = await pg.evaluate(_JS_HANDLE_RG_POPUP)
+                    if _rg:
+                        _rg_count += 1
+                        log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 처리 (판매자배송+확인) — 상품등록 재시도 예정 ({inv_id})")
+                        break
+                    # ② 에러 팝업 (로켓그로스 제외)
                     _dismissed = await pg.evaluate(_JS_DISMISS_ERR)
                     if _dismissed:
-                        _err_first = True
-                        log(f"[Wing 판매요청] ⚠️ 에러 팝업 즉시 감지 → 확인 클릭 ({inv_id}) 내용: {_dismissed}")
+                        log(f"[Wing 판매요청] ⚠️ 에러 팝업 → 확인 클릭 ({inv_id}): {_dismissed}")
+                        await asyncio.sleep(3)
+                        _rc = await pg.evaluate(_JS_CLICK_FOOTER)
+                        if not _rc:
+                            log(f"[Wing 판매요청] ❌ 에러 후 footer 버튼 미발견 ({inv_id})")
+                            errors.append(f'등록실패(버튼미발견)({prod_name[:25]})')
+                            await self._shot(f"bulk_fail_{inv_id}")
+                            _skip_item = True
+                        else:
+                            log("[Wing 판매요청] 🔄 에러 후 상품등록 재시도")
+                            for _rw in range(10):
+                                await asyncio.sleep(0.3)
+                                _e2 = await pg.evaluate(_JS_DISMISS_ERR)
+                                if _e2:
+                                    log(f"[Wing 판매요청] ❌ 재시도 후 에러 지속 ({inv_id}): {_e2}")
+                                    errors.append(f'등록실패(에러지속)({prod_name[:25]}): {_e2[:40]}')
+                                    await self._shot(f"bulk_fail_{inv_id}")
+                                    _skip_item = True
+                                    break
+                                _c2 = await pg.evaluate(_JS_CLICK_CONFIRM)
+                                if _c2:
+                                    log("[Wing 판매요청] 🔄 에러 후 재시도 확인 팝업 클릭 ✅")
+                                    _registered_by_confirm = True
+                                    break
+                            else:
+                                log("[Wing 판매요청] ⚠️ 에러 후 재시도 팝업 미감지")
                         break
-                    # ② 정상 확인 팝업 확인
+                    # ③ 등록 확인 팝업
                     _confirmed = await pg.evaluate(_JS_CLICK_CONFIRM)
                     if _confirmed:
-                        log("[Wing 판매요청] 확인 팝업 클릭 ✅")
+                        log("[Wing 판매요청] 등록 확인 팝업 클릭 ✅")
+                        _registered_by_confirm = True
                         break
                 else:
-                    log("[Wing 판매요청] ⚠️ 확인/에러 팝업 미감지 — 팝업 없이 진행")
+                    log("[Wing 판매요청] ⚠️ 팝업 미감지 — 팝업 없이 진행")
 
-                # ── Step 2: 에러 팝업이 먼저 떴으면 → 3초 대기 → footer 재클릭 ──
-                if _err_first:
-                    log("[Wing 판매요청] 🔄 3초 대기 후 상품등록 재시도...")
-                    await asyncio.sleep(3)
-
-                    _retry_clicked = await pg.evaluate(_JS_CLICK_FOOTER)
-                    if not _retry_clicked:
-                        log(f"[Wing 판매요청] ❌ 재시도 footer 버튼 미발견 ({inv_id})")
-                        errors.append(f"등록실패(버튼미발견)({prod_name[:25]}): 에러팝업후재시도불가")
+                # ── Step 2: 로켓그로스 팝업 처리 후 상품등록 재시도 (최대 3회) ────
+                for _rg_retry in range(3):
+                    if not (_rg_count > 0 and not _skip_item and not _registered_by_confirm):
+                        break
+                    log(f"[Wing 판매요청] 🔄 로켓그로스 처리 후 2초 대기 → 상품등록 재클릭 (시도 {_rg_retry+1}/3, {inv_id})")
+                    await asyncio.sleep(2)
+                    _rc2 = await pg.evaluate(_JS_CLICK_FOOTER)
+                    if not _rc2:
+                        log(f"[Wing 판매요청] ℹ️ 상품등록 footer 버튼 없음 — 이미 등록/페이지 전환 ({inv_id})")
+                        break
+                    log("[Wing 판매요청] 🔄 상품등록 버튼 재클릭")
+                    _rg_count = 0  # 이번 재시도에서 RG 팝업이 재등장하는지 감시
+                    for _rw2 in range(15):   # 0.3s × 15 = 4.5초
+                        await asyncio.sleep(0.3)
+                        _rg2 = await pg.evaluate(_JS_HANDLE_RG_POPUP)
+                        if _rg2:
+                            _rg_count += 1
+                            log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 재등장 — 처리 완료 (시도 {_rg_retry+1})")
+                            break  # for _rw2 종료 → for _rg_retry 재진입
+                        _e3 = await pg.evaluate(_JS_DISMISS_ERR)
+                        if _e3:
+                            log(f"[Wing 판매요청] ❌ 재시도 중 에러 팝업 ({inv_id}): {_e3}")
+                            errors.append(f'등록실패(에러)({prod_name[:25]}): {_e3[:40]}')
+                            await self._shot(f"bulk_fail_{inv_id}")
+                            _skip_item = True
+                            break
+                        _c3 = await pg.evaluate(_JS_CLICK_CONFIRM)
+                        if _c3:
+                            log("[Wing 판매요청] ✅ 상품등록 확인 팝업 클릭")
+                            _registered_by_confirm = True
+                            break
+                    else:
+                        log(f"[Wing 판매요청] ⚠️ 재시도 팝업 미감지 (시도 {_rg_retry+1})")
+                    if _skip_item or _registered_by_confirm:
+                        break
+                    if _rg_count > 0 and _rg_retry == 2:
+                        log(f"[Wing 판매요청] ❌ 로켓그로스 팝업 3회 반복 한도 초과 ({inv_id})")
+                        errors.append(f'등록실패(RG팝업반복)({prod_name[:25]}): 판매방식선택후재등록불가')
                         await self._shot(f"bulk_fail_{inv_id}")
                         _skip_item = True
-                    else:
-                        log("[Wing 판매요청] 🔄 재시도 — 상품등록 버튼 클릭")
-                        # 재시도 후 팝업 폴링 (0.3s × 10 = 3초)
-                        for _rw in range(10):
-                            await asyncio.sleep(0.3)
-                            # 에러 팝업 다시 뜨면 즉시 닫고 실패 처리
-                            _err_again = await pg.evaluate(_JS_DISMISS_ERR)
-                            if _err_again:
-                                log(f"[Wing 판매요청] ❌ 재시도 후에도 에러 팝업 ({inv_id}) 내용: {_err_again}")
-                                errors.append(f"등록실패(에러지속)({prod_name[:25]}): 옵션항목오류지속")
-                                await self._shot(f"bulk_fail_{inv_id}")
-                                _skip_item = True
-                                break
-                            _conf2 = await pg.evaluate(_JS_CLICK_CONFIRM)
-                            if _conf2:
-                                log("[Wing 판매요청] 🔄 재시도 확인 팝업 클릭 ✅")
-                                break
-                        else:
-                            log("[Wing 판매요청] ⚠️ 재시도 확인 팝업 미감지 — 팝업 없이 진행")
+                        break
 
                 # ── 네트워크 로그 정리 ───────────────────────────────────
                 try:
@@ -2689,25 +2760,30 @@ class WingAutomator:
                     log(f"[Wing API] {c}")
                 log(f"[Wing 판매요청] URL: {pg.url[-60:]}")
 
-                # ── API 201 성공 감지: 에러 팝업 여부와 무관하게 실제 등록 완료 확인 ─
-                _api_registered = any(c.get("status") == 201 for c in api_calls)
-                if _api_registered:
-                    # 에러 팝업이 있었어도 실제 등록됐으면 오류 목록에서 제거
-                    if _skip_item and errors and any(
-                        k in errors[-1] for k in ("등록실패(에러지속)", "등록실패(버튼미발견)")
-                    ):
-                        errors.pop()
+                # ── 성공/실패 판정 ─────────────────────────────────────
+                if _skip_item:
+                    pass  # 에러로 이미 처리됨
+                elif _registered_by_confirm:
+                    # 확인 팝업 클릭 후 3초 대기 → 페이지 상태 확인
+                    await asyncio.sleep(3)
+                    _status_after: str = await pg.evaluate("""
+                        () => {
+                            for (const el of document.querySelectorAll('*')) {
+                                if (!el.offsetParent || el.children.length > 0) continue;
+                                const t = el.textContent.trim();
+                                if (['판매중', '심사중'].includes(t)) return t;
+                            }
+                            return '';
+                        }
+                    """) or ""
+                    _url_changed = '/edit' not in pg.url
                     published += 1
                     if prod_name:
                         published_names.append(prod_name)
-                    log(f"[Wing 판매요청] ✅ API 201 감지 → 실제 등록 완료 ({inv_id})")
-                elif _skip_item:
-                    # 에러로 이미 처리됨 → 다음 상품
-                    pass
+                    log(f"[Wing 판매요청] ✅ 등록 완료 (상태:{_status_after or '-'}, URL변경:{_url_changed}) ({inv_id})")
                 else:
-                    # ── Step 3: 등록 완료 대기 (3초) + 최종 에러 확인 ────────
+                    # ── Step 3: 팝업 없이 진행 — 최종 에러 확인 ──────
                     await asyncio.sleep(3)
-
                     _err_final: str = await pg.evaluate("""
                         () => {
                             const ERR_KW = [
@@ -2715,7 +2791,6 @@ class WingAutomator:
                                 '등록불가', '등록 불가', '오류가 발생', '실패했습니다',
                                 '확인해주세요', '확인하세요', '잘못된 값',
                             ];
-                            /* toast / snack / alert 계열 */
                             const SEL = [
                                 '[class*="toast"]', '[class*="snack"]',
                                 '[class*="alert"]:not([class*="success"])',
@@ -2730,14 +2805,14 @@ class WingAutomator:
                                         return txt.substring(0, 150);
                                 }
                             }
-                            /* 아직 살아있는 에러 팝업 재확인 (텍스트 기반) */
                             const ERR_KW2 = ['확인해주세요', '입력항목을 모두', '옵션 항목을 확인'];
                             for (const btn of document.querySelectorAll('button')) {
                                 if (!btn.offsetParent) continue;
                                 if (btn.textContent.trim() !== '확인') continue;
                                 let p = btn.parentElement;
                                 for (let d = 0; d < 8 && p && p !== document.body; d++) {
-                                    if (ERR_KW2.some(k => p.textContent.includes(k)))
+                                    if (ERR_KW2.some(k => p.textContent.includes(k)) &&
+                                        !p.textContent.includes('로켓그로스'))
                                         return p.textContent.trim().substring(0, 150);
                                     p = p.parentElement;
                                 }
@@ -2753,7 +2828,7 @@ class WingAutomator:
                         log(f"[Wing 판매요청] ✅ 등록 성공 ({inv_id})")
                     else:
                         log(f"[Wing 판매요청] ❌ 등록 실패 ({inv_id}): {_err_final[:80]}")
-                        errors.append(f"등록실패({prod_name[:20]}): {_err_final[:50]}")
+                        errors.append(f'등록실패({prod_name[:20]}): {_err_final[:50]}')
                         await self._shot(f"bulk_fail_{inv_id}")
             else:
                 visible_btns = [t for t in all_btn_texts if t][:8]
