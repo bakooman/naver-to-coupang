@@ -669,10 +669,30 @@ def _auto_brand(name: str) -> str:
 # ── 브랜드 매핑 테이블 (누적 저장) ──────────────────────────────────
 _BRAND_MAP_FILE = Path(__file__).parent / "data" / "brand_map.json"
 
+_BRAND_MAP_INVALID_VALUES = {
+    "unknown", "없음", "모름", "thought", "none", "null", "n/a", "error",
+    "브랜드", "brand", "브랜드명", "제조사",
+}
+
 def _load_brand_map() -> dict:
     try:
         if _BRAND_MAP_FILE.exists():
-            return json.loads(_BRAND_MAP_FILE.read_text(encoding="utf-8"))
+            raw = json.loads(_BRAND_MAP_FILE.read_text(encoding="utf-8"))
+            # Gemini 환각으로 오염된 값 자동 제거 (예: '맥심' → 'THOUGHT')
+            cleaned = {
+                k: v for k, v in raw.items()
+                if v and v.strip().lower() not in _BRAND_MAP_INVALID_VALUES
+            }
+            if len(cleaned) != len(raw):
+                _removed = {k: v for k, v in raw.items() if k not in cleaned}
+                print(f"[BrandMap] 오염 항목 자동 제거: {_removed}")
+                try:
+                    _BRAND_MAP_FILE.write_text(
+                        json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                except Exception:
+                    pass
+            return cleaned
     except Exception:
         pass
     return {}
@@ -762,7 +782,7 @@ async def _resolve_brand_korean(brand: str, product_name: str = "") -> str:
                 None, lambda: genai.GenerativeModel(_gm).generate_content(_prompt)
             )
             result = (resp.text or "").strip().split("\n")[0].strip()
-            if result and len(result) <= 50 and result.lower() not in ("unknown", "없음", "모름"):
+            if result and len(result) <= 50 and result.lower() not in _BRAND_MAP_INVALID_VALUES:
                 if result != brand:
                     # 변환 결과가 다르면 테이블에 저장 (다음부터 Gemini 호출 없이 즉시 사용)
                     bmap[brand] = result
@@ -2003,12 +2023,15 @@ async def _process_entry(
         # ── [Gemini 검수] 1~2순위 자동 매핑 결과를 Gemini로 검증 ────────
         # 잘못된 카테고리가 그대로 등록되는 오매핑 방지
         # 예) "후추 분쇄기" → 분쇄기(가전) 오매핑 / "커피 그라인더" → 커피 오매핑
+        # ※ [자동] 접두사 없는 키워드 = category_map.json 수동 관리 항목 → 검수 불필요
+        _is_manual_kw = detected_kw and not detected_kw.startswith("[자동]") and not detected_kw.startswith("[네이버카테고리]")
         _gk_verify = getattr(_settings, "GEMINI_API_KEY", "")
         if (
             entry.category_id
             and not entry.category_is_manual
             and detected_kw
             and _gk_verify
+            and not _is_manual_kw
         ):
             try:
                 _cat_name_for_verify = detector.get_name_by_id(entry.category_id)
