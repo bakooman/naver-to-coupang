@@ -337,7 +337,7 @@ class ImageProcessor:
         ty   = cy - th // 2 - bbox[1]
 
         draw.text((tx, ty), text, fill=text_color, font=font,
-                  stroke_width=2, stroke_fill=stroke_fill)
+                  stroke_width=1, stroke_fill=stroke_fill)
 
         return image
 
