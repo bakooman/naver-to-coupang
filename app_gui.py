@@ -51,6 +51,25 @@ from modules.product_history import (
     get_history_count as _get_history_count,
 )
 
+# ── URL 추가 성공 시 "띠링" 소리 (Web Audio API, 외부 파일 불필요) ──
+_DING_JS = """
+(function() {
+    try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.45, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.45);
+    } catch(e) {}
+})();
+"""
+
 # ── 정적 파일 서빙 ─────────────────────────────────────────────────
 _IMG_ROOT    = Path(__file__).parent / "data" / "images"
 _OUTPUT_ROOT = Path(__file__).parent / "data" / "output"
@@ -2096,15 +2115,54 @@ async def _process_entry(
                     genai.configure(api_key=_gk)
                     _gclient = genai.GenerativeModel(_gm)
 
-                    # ── [수정] 프롬프트: "키워드"가 아닌 실제 카테고리 명칭 요청 ──
-                    # 쉼표 구분 3개 후보 + 띄어쓰기 허용 (오일 필터, 과자/스낵 등)
+                    # ── Wing 후보 목록 생성: 상품 도메인에 맞는 세분류 이름 추출 ──
+                    # 네이버 카테고리 + 상품명 키워드로 Wing DB에서 연관 경로 필터링
+                    def _get_wing_candidates(pname: str, naver_cat: str) -> str:
+                        _combined = f"{pname} {naver_cat}".lower()
+                        # 경로 키워드 → Wing DB path 필터
+                        _path_hints = []
+                        if any(w in _combined for w in ["커피", "coffee"]):
+                            _path_hints.append("커피")
+                        if any(w in _combined for w in ["녹차", "홍차", "보리차", "율무", "둥글레", "차"]):
+                            _path_hints.append("티/전통차")
+                        if any(w in _combined for w in ["음료", "주스", "드링크"]):
+                            _path_hints.append("음료")
+                        if any(w in _combined for w in ["과자", "스낵", "비스킷", "쿠키"]):
+                            _path_hints.append("과자")
+                        if any(w in _combined for w in ["라면", "국수", "파스타"]):
+                            _path_hints.append("면류")
+                        if any(w in _combined for w in ["세제", "샴푸", "비누", "치약"]):
+                            _path_hints.append("생활용품")
+                        if not _path_hints:
+                            return ""
+                        try:
+                            _flat = _load_wing_flat() if hasattr(detector, "_fallback_wing_search") else []
+                            from modules.category_detector import _load_wing_flat as _lwf
+                            _flat = _lwf()
+                            _candidates = []
+                            for _e in _flat:
+                                _epath = _e.get("path", "")
+                                _ename = _e.get("name", "")
+                                if not _ename or len(_ename) < 2:
+                                    continue
+                                if any(h in _epath for h in _path_hints):
+                                    _candidates.append(_ename)
+                            if _candidates:
+                                return "아래는 실제 쿠팡 Wing 카테고리 세분류 목록입니다. 이 중에서 선택하세요:\n" + ", ".join(_candidates[:60])
+                        except Exception:
+                            pass
+                        return ""
+
+                    _wing_hint = _get_wing_candidates(product.name, product.naver_category or "")
+
+                    # ── 프롬프트: Wing 후보 목록 포함 ──
                     _cat_prompt = (
                         f"상품명(한국어): {product.name}\n"
                         f"네이버 카테고리 경로: {product.naver_category or '없음'}\n\n"
-                        "이 상품을 쿠팡·네이버 같은 온라인 쇼핑몰에 등록할 때 사용하는 "
-                        "정확한 카테고리 명칭 후보를 3개 답하세요.\n"
-                        "카테고리 명칭은 실제 쇼핑몰에서 쓰이는 표현으로 작성하세요.\n"
-                        "예시: 스니커즈, 치약, 과자/스낵, 오일 필터, 엔진오일, 구취제거제, 세탁세제\n"
+                        + (_wing_hint + "\n\n" if _wing_hint else "")
+                        + "위 목록에서 이 상품에 가장 적합한 카테고리 명칭 후보를 3개 답하세요.\n"
+                        "반드시 위 목록에 있는 정확한 명칭 그대로 사용하세요 (변형 금지).\n"
+                        "목록이 없으면 쇼핑몰에서 쓰이는 표현으로 작성하세요.\n"
                         "형식: 명칭1,명칭2,명칭3\n"
                         "명칭만 답하세요. 설명·문장 금지."
                     )
@@ -6446,6 +6504,11 @@ def page() -> None:
                                     if other_urls:    msg_parts.append(f"{other_urls}개 비네이버 제외")
                                     msg = " / ".join(msg_parts)
                                     bulk_result_lbl.set_text(msg)
+                                    if added:
+                                        try:
+                                            await ui.run_javascript(_DING_JS)
+                                        except Exception:
+                                            pass
                                     ui.notify(msg, type="positive" if added else "warning")
                                 except Exception as ex:
                                     ui.notify(f"파일 읽기 오류: {ex}", type="negative")
@@ -6580,10 +6643,15 @@ def page() -> None:
                                 ui.button("🗑 목록 초기화", icon="delete_sweep",
                                     on_click=_on_reset_queue,
                                 ).props("color=red-7 outline size=md").classes("font-bold")
-                                wing_pub_btn = ui.button(
-                                    "🚀 판매요청 시작", icon="send"
+                                wing_pub_btn_shopk = ui.button(
+                                    "🚀 샵케이", icon="send"
                                 ).props("color=deep-orange size=md").classes("font-bold").on_click(
-                                    lambda: _on_wing_publish()
+                                    lambda: _on_wing_publish("샵케이")
+                                )
+                                wing_pub_btn_zenith = ui.button(
+                                    "🚀 제니스 트레이딩", icon="send"
+                                ).props("color=indigo size=md").classes("font-bold").on_click(
+                                    lambda: _on_wing_publish("제니스 트레이딩")
                                 )
                         wing_pub_status = ui.label("").classes("text-xs text-slate-500")
 
@@ -7266,6 +7334,10 @@ def page() -> None:
                 _new_gosisi = _guide_gosisi_cat(code)
                 if _new_gosisi:
                     e_ref.gosisi_cat = _new_gosisi
+                # 수동 선택된 카테고리 이름으로 detected_keyword 갱신 → UI 표시용
+                from modules.category_detector import get_detector as _gdet
+                _cat_display_name = _gdet().get_name_by_id(code) or code
+                e_ref.detected_keyword = f"[수동입력]{_cat_display_name}"
                 if e_ref.result_item:
                     e_ref.result_item.category_id = code
                     if _new_gosisi:
@@ -7373,7 +7445,7 @@ def page() -> None:
             shipping_summary_card.set_visibility(False)
 
         with queue_container:
-            for entry in queue:
+            for _q_idx, entry in enumerate(queue, 1):
                 status_color = {
                     "pending":    "grey",
                     "processing": "orange",
@@ -7397,7 +7469,7 @@ def page() -> None:
                             ui.icon(status_icon, color=status_color, size="sm")
                             with ui.column().classes("gap-0 flex-1 min-w-0"):
                                 display_name = entry.product_name or entry.url[:70]
-                                ui.label(display_name).classes(
+                                ui.label(f"{_q_idx}. {display_name}").classes(
                                     "text-sm font-semibold text-slate-700 truncate"
                                 )
                                 if entry.error:
@@ -7813,14 +7885,23 @@ def page() -> None:
                                         + (f"  ({entry.dup_matched_date})" if entry.dup_matched_date else "")
                                     ).classes("text-xs text-slate-500 ml-4 font-mono")
 
-                        # done/error: 자동 감지된 카테고리 표시
+                        # done/error: 카테고리 감지 결과 표시
                         if entry.status in ("done", "error") and entry.detected_keyword:
-                            kw_color = "teal" if entry.category_id else "orange"
-                            kw_text  = (
-                                f"키워드: {entry.detected_keyword} | "
-                                f"ID: {entry.category_id or '미설정'} | "
-                                f"{entry.gosisi_cat[:18]}..."
-                            )
+                            if entry.category_is_manual:
+                                kw_color = "blue"
+                                _manual_name = entry.detected_keyword.removeprefix("[수동입력]")
+                                kw_text = (
+                                    f"수동입력 카테고리: {_manual_name} | "
+                                    f"ID: {entry.category_id} | "
+                                    f"{entry.gosisi_cat[:18]}..."
+                                )
+                            else:
+                                kw_color = "teal" if entry.category_id else "orange"
+                                kw_text  = (
+                                    f"키워드: {entry.detected_keyword} | "
+                                    f"ID: {entry.category_id or '미설정'} | "
+                                    f"{entry.gosisi_cat[:18]}..."
+                                )
                             ui.label(kw_text).classes(
                                 f"text-xs text-{kw_color}-600 font-mono mt-1"
                             )
@@ -8622,6 +8703,7 @@ def page() -> None:
         new_url_input.set_value("")
         new_brand_input.set_value("")
         _render_queue()
+        asyncio.ensure_future(ui.run_javascript(_DING_JS))
         ui.notify(f"추가됨: {url[:50]}...", type="positive", timeout=2000)
 
     def _remove_entry(uid: str):
@@ -8915,12 +8997,10 @@ def page() -> None:
 
     # ── Wing 자동 판매요청 핸들러 ─────────────────────────────────
 
-    async def _on_wing_publish():
+    async def _on_wing_publish(store: str | None = None):
         """
         Wing 임시저장 목록에서 draft=False 상품들에 판매요청 클릭.
-        watch_store 별로 계정을 분기해 순차 실행:
-          - 샵케이       → WING_USERNAME / WING_PASSWORD
-          - 제니스 트레이딩 → WING_USERNAME_ZENITH / WING_PASSWORD_ZENITH
+        store 지정 시 해당 스토어만 실행. None이면 큐 기반 자동 결정.
         """
         # 스토어별 계정 매핑
         _STORE_CREDS = {
@@ -8934,17 +9014,20 @@ def page() -> None:
             ),
         }
 
-        # 큐에 있는 done 항목의 스토어 목록 수집
-        _stores_in_queue = list(dict.fromkeys(
-            getattr(e, "watch_store", "샵케이")
-            for e in queue if e.status == "done" and e.result_item
-        ))
-        # 큐가 비어있거나 완료 상품 없으면 → 계정 정보가 있는 모든 스토어 대상으로 실행
-        # (Wing에 직접 접속해 임시저장 목록을 처리하므로 큐 상태 무관)
-        if not _stores_in_queue:
-            _stores_in_queue = [
-                _st for _st, (_u, _p) in _STORE_CREDS.items() if _u and _p
-            ]
+        if store is not None:
+            # 버튼으로 직접 지정된 스토어만 실행
+            _stores_in_queue = [store]
+        else:
+            # 큐에 있는 done 항목의 스토어 목록 수집
+            _stores_in_queue = list(dict.fromkeys(
+                getattr(e, "watch_store", "샵케이")
+                for e in queue if e.status == "done" and e.result_item
+            ))
+            if not _stores_in_queue:
+                _stores_in_queue = [
+                    _st for _st, (_u, _p) in _STORE_CREDS.items() if _u and _p
+                ]
+
         if not _stores_in_queue:
             ui.notify("Wing 계정 정보가 없습니다 — .env에서 WING_USERNAME/WING_PASSWORD 확인", type="negative", timeout=5000)
             return
@@ -8989,7 +9072,8 @@ def page() -> None:
             return
 
         _global_wing_running["v"] = True
-        wing_pub_btn.set_enabled(False)
+        wing_pub_btn_shopk.set_enabled(False)
+        wing_pub_btn_zenith.set_enabled(False)
         _store_label = " + ".join(_stores_in_queue)
         wing_pub_status.set_text(f"⏳ Wing 실행 중 ({_store_label})...")
         ui.notify(f"Wing 판매요청 시작 — {_store_label}", type="info", timeout=4000)
@@ -9082,7 +9166,8 @@ def page() -> None:
             ui.notify(f"Wing 판매요청 오류: {exc}", type="negative", timeout=6000)
         finally:
             _global_wing_running["v"] = False
-            wing_pub_btn.set_enabled(True)
+            wing_pub_btn_shopk.set_enabled(True)
+            wing_pub_btn_zenith.set_enabled(True)
 
     # 초기 렌더링 + 기존 로그 복원
     _render_queue()

@@ -269,7 +269,7 @@ class CategoryDetector:
             code: str = entry.get("code", "")
             if not name or not code:
                 continue
-            if name in _SKIP_NAMES or len(name) <= 2:
+            if name in _SKIP_NAMES or len(name) < 2:
                 continue
             # 카테고리명 정규화 후 상품명에 포함 여부 확인
             name_norm = name.lower().replace(" ", "").replace("-", "")
@@ -347,7 +347,7 @@ class CategoryDetector:
             code: str = entry.get("code", "")
             if not name or not code:
                 continue
-            if name in _SKIP_NAMES or len(name) <= 2:
+            if name in _SKIP_NAMES or len(name) < 2:
                 continue
 
             name_norm   = _norm(name)

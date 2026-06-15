@@ -655,10 +655,40 @@
       "gosisi_cat": "가공식품",
       "priority": 17
     },
-    "커피믹스": {
+    "원두커피믹스": {
       "category_id": "72831",
       "gosisi_cat": "가공식품",
+      "priority": 19
+    },
+    "아이스커피믹스": {
+      "category_id": "58848",
+      "gosisi_cat": "가공식품",
+      "priority": 19
+    },
+    "일반커피믹스": {
+      "category_id": "58845",
+      "gosisi_cat": "가공식품",
+      "priority": 19
+    },
+    "커피믹스": {
+      "category_id": "58845",
+      "gosisi_cat": "가공식품",
       "priority": 16
+    },
+    "블랙커피": {
+      "category_id": "72831",
+      "gosisi_cat": "가공식품",
+      "priority": 17
+    },
+    "라떼분말": {
+      "category_id": "72882",
+      "gosisi_cat": "가공식품",
+      "priority": 17
+    },
+    "코코아분말": {
+      "category_id": "72881",
+      "gosisi_cat": "가공식품",
+      "priority": 17
     },
     "커피음료": {
       "category_id": "58795",
@@ -669,6 +699,82 @@
       "category_id": "72849",
       "gosisi_cat": "가공식품",
       "priority": 12
+    },
+    "── 식품 > 차류 ─────────────────────────────────────────": {},
+    "현미녹차": {
+      "category_id": "58865",
+      "gosisi_cat": "가공식품",
+      "priority": 19
+    },
+    "녹차": {
+      "category_id": "58865",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "보리차": {
+      "category_id": "58861",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "옥수수차": {
+      "category_id": "58862",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "둥글레차": {
+      "category_id": "59144",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "율무차": {
+      "category_id": "58871",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "홍차": {
+      "category_id": "58867",
+      "gosisi_cat": "가공식품",
+      "priority": 16
+    },
+    "유자차": {
+      "category_id": "58869",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "대추차": {
+      "category_id": "58873",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "생강차": {
+      "category_id": "72873",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "쌍화차": {
+      "category_id": "72901",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "인삼차": {
+      "category_id": "72895",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "홍삼차": {
+      "category_id": "72896",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "우엉차": {
+      "category_id": "72909",
+      "gosisi_cat": "가공식품",
+      "priority": 15
+    },
+    "곡물차": {
+      "category_id": "59147",
+      "gosisi_cat": "가공식품",
+      "priority": 15
     },
     "── 식품 > 소스/조미료 ───────────────────────────────────────": {},
     "케첩": {
