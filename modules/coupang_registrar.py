@@ -985,6 +985,100 @@ class CoupangRegistrar:
     # 5. 연결 테스트
     # ────────────────────────────────────────────────────────────
 
+    # ────────────────────────────────────────────────────────────
+    # 브랜드 검색 및 매칭
+    # ────────────────────────────────────────────────────────────
+
+    def search_brands(self, keyword: str) -> list[dict]:
+        """
+        쿠팡 브랜드 검색 API 호출.
+
+        API: GET /v2/providers/seller_api/apis/api/v1/marketplace/meta/brands
+        params: keyword={브랜드명}
+
+        반환: [{"brandId": 12345, "brandName": "Nike"}, ...]
+        """
+        if not keyword or not keyword.strip():
+            return []
+
+        try:
+            data = self._get(
+                "/v2/providers/seller_api/apis/api/v1/marketplace/meta/brands",
+                {"keyword": keyword.strip()},
+            )
+            raw_list = data.get("data") or []
+            if isinstance(raw_list, dict):
+                raw_list = raw_list.get("brands") or raw_list.get("items") or []
+
+            results = []
+            for item in raw_list:
+                if not isinstance(item, dict):
+                    continue
+                bid   = item.get("brandId") or item.get("id")
+                bname = item.get("brandName") or item.get("name") or ""
+                if bid and bname:
+                    results.append({"brandId": int(bid), "brandName": str(bname)})
+            return results
+        except Exception as e:
+            print(f"[Coupang] 브랜드 검색 실패 (keyword={keyword}): {e}")
+            return []
+
+    def resolve_brand(
+        self,
+        naver_brand: str,
+        gemini_api_key: str = "",
+        gemini_model: str = "gemini-2.0-flash",
+    ) -> str:
+        """
+        네이버 브랜드명 → 쿠팡 공식 브랜드명(매칭 성공 시) 또는 원본 브랜드명(폴백).
+
+        파이프라인:
+          1) 쿠팡 브랜드 검색 API로 후보 조회
+          2) 후보 1개면 바로 확정
+          3) 후보 여러 개면 Gemini로 최적 매칭
+          4) 실패/확신 없음 → 원본 브랜드명 반환 (직접입력으로 처리)
+
+        반환: 쿠팡에 등록할 브랜드명 문자열
+        """
+        if not naver_brand:
+            return "해당없음"
+
+        print(f"[Brand] 브랜드 매칭 시작: '{naver_brand}'")
+
+        candidates = self.search_brands(naver_brand)
+        if not candidates:
+            print(f"[Brand] 쿠팡 브랜드 검색 결과 없음 → 직접입력: '{naver_brand}'")
+            return naver_brand
+
+        print(f"[Brand] 후보 {len(candidates)}개: {[c['brandName'] for c in candidates[:5]]}")
+
+        # 후보 1개이고 이름이 완전히 같으면(대소문자 무시) 바로 확정
+        if len(candidates) == 1:
+            matched = candidates[0]
+            print(f"[Brand] 단일 후보 확정: '{matched['brandName']}' (id={matched['brandId']})")
+            return matched["brandName"]
+
+        # 후보 여러 개 → Gemini 매칭
+        if gemini_api_key:
+            from modules.gemini_writer import match_brand_with_gemini
+            matched = match_brand_with_gemini(
+                naver_brand=naver_brand,
+                coupang_candidates=candidates,
+                api_key=gemini_api_key,
+                model=gemini_model,
+            )
+            if matched:
+                print(
+                    f"[Brand] Gemini 매칭 성공: '{naver_brand}' → "
+                    f"'{matched['brandName']}' (id={matched['brandId']})"
+                )
+                return matched["brandName"]
+            print(f"[Brand] Gemini 매칭 실패(확신 없음) → 직접입력: '{naver_brand}'")
+        else:
+            print("[Brand] Gemini API 키 없음 → 직접입력 폴백")
+
+        return naver_brand
+
     def diagnose_proxy(self) -> bool:
         """
         SOCKS5 프록시를 실제로 통과해 공개 IP를 확인.

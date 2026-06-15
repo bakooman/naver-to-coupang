@@ -38,6 +38,7 @@ from modules.category_detector import get_detector as _get_detector
 from modules.gtin_lookup import lookup as _gtin_lookup, lookup_with_retry as _gtin_lookup_retry
 from modules.wing_automator import run_bulk_publish_sync as _run_bulk_publish
 from modules.gemini_writer import generate_detail_image_url as _gemini_detail
+from modules.coupang_registrar import CoupangRegistrar
 import modules.price_checker as _pc
 from modules.notifier import (
     send_notification as _send_notification,
@@ -239,6 +240,14 @@ class _AuthMiddleware(_BaseHTTPMiddleware):
 _app.add_middleware(_AuthMiddleware)
 
 _settings = Settings()
+
+_registrar_instance: Optional[CoupangRegistrar] = None
+
+def _get_registrar() -> CoupangRegistrar:
+    global _registrar_instance
+    if _registrar_instance is None:
+        _registrar_instance = CoupangRegistrar(_settings)
+    return _registrar_instance
 
 # ── 쿠팡 카테고리별 유효 구매옵션 + gosisi_cat 데이터 ─────────────────
 _CAT_OPTIONS_PATH = Path(__file__).parent / "config" / "category_options.json"
@@ -1918,6 +1927,27 @@ async def _process_entry(
             entry.brand = await _resolve_brand_korean(entry.brand, product.name)
             if entry.brand != _brand_before:
                 log_(f"[{entry.uid[:6]}] 브랜드 변환: '{_brand_before}' → '{entry.brand}'")
+
+        # ── 브랜드 쿠팡 공식 DB 매칭 (직접입력 → 공식 브랜드 ID 매칭) ──────
+        # resolve_brand: 쿠팡 브랜드 검색 API → Gemini 최적 매칭 → 상위노출 개선
+        if entry.brand and entry.brand not in ("해당없음", ""):
+            _gemini_key = getattr(_settings, "GEMINI_API_KEY", "")
+            _gemini_model = getattr(_settings, "GEMINI_MODEL", "gemini-2.0-flash")
+            try:
+                _registrar = _get_registrar()
+                _brand_matched = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: _registrar.resolve_brand(
+                        entry.brand,
+                        gemini_api_key=_gemini_key,
+                        gemini_model=_gemini_model,
+                    ),
+                )
+                if _brand_matched and _brand_matched != entry.brand:
+                    log_(f"[{entry.uid[:6]}] 브랜드 쿠팡DB 매칭: '{entry.brand}' → '{_brand_matched}'")
+                    entry.brand = _brand_matched
+            except Exception as _be:
+                log_(f"[{entry.uid[:6]}] 브랜드 쿠팡DB 매칭 실패(무시): {_be}")
 
         # ── 1-a. 카테고리 감지 (3단계) + Gemini 무조건 검증 ─────────
         #

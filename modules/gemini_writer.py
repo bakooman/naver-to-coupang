@@ -416,3 +416,84 @@ def generate_compliant_product_name(
         print(f"[Gemini] 상품명 정제 실패: {e}")
 
     return raw_name
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 브랜드 매칭 함수
+# ──────────────────────────────────────────────────────────────────────────────
+
+def match_brand_with_gemini(
+    naver_brand: str,
+    coupang_candidates: list[dict],
+    api_key: str,
+    model: str = "gemini-2.0-flash",
+) -> Optional[dict]:
+    """
+    네이버 브랜드명과 쿠팡 브랜드 후보 목록을 비교해 가장 적합한 쿠팡 브랜드 반환.
+
+    coupang_candidates 형식:
+      [{"brandId": 12345, "brandName": "Nike"}, ...]
+
+    반환값:
+      일치하는 브랜드 dict (brandId, brandName) 또는 None (억지 매칭 금지)
+    """
+    if not naver_brand or not coupang_candidates or not api_key:
+        return None
+
+    try:
+        import json
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+
+        candidates_text = "\n".join(
+            f"  - brandId={c['brandId']}, brandName={c['brandName']}"
+            for c in coupang_candidates[:30]
+        )
+
+        prompt = textwrap.dedent(f"""
+            당신은 브랜드 매칭 전문가입니다.
+            네이버 브랜드명과 쿠팡 공식 브랜드 후보 목록을 비교해 가장 적합한 브랜드를 선택하세요.
+
+            [규칙]
+            1. 한글/영문 혼용, 약어, 띄어쓰기 차이, 대소문자 차이를 모두 감안하세요.
+               예) "나이키" = "Nike" = "NIKE"
+               예) "삼성전자" = "Samsung" = "SAMSUNG Electronics"
+            2. 확실하게 같은 브랜드라고 판단될 때만 선택하세요.
+            3. 확신이 없으면 반드시 null을 반환하세요. 억지로 매칭하지 마세요.
+            4. 오직 JSON만 출력하세요. 설명 없이.
+
+            [네이버 브랜드명]
+            {naver_brand}
+
+            [쿠팡 브랜드 후보]
+            {candidates_text}
+
+            [출력 형식]
+            일치하는 브랜드가 있으면:
+            {{"brandId": 12345, "brandName": "BrandName"}}
+
+            일치하는 브랜드가 없으면:
+            null
+        """).strip()
+
+        resp = client.models.generate_content(
+            model=model,
+            contents=[types.Part.from_text(text=prompt)],
+        )
+        raw = (resp.text or "").strip()
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+
+        if raw.lower() == "null" or not raw:
+            return None
+
+        result = json.loads(raw)
+        if isinstance(result, dict) and result.get("brandId") and result.get("brandName"):
+            return result
+        return None
+
+    except Exception as e:
+        print(f"[Gemini] 브랜드 매칭 실패: {e}")
+        return None

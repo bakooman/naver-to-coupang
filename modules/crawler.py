@@ -74,6 +74,7 @@ class ProductData:
     naver_options:    list[NaverOption] = field(default_factory=list)  # 네이버 상품 옵션
     naver_category:   str              = ""  # 네이버 카테고리 전체 경로 (예: "식품>사탕/캔디>기타사탕")
     detail_images:    list[str]        = field(default_factory=list)  # 상품 상세페이지 이미지 URL 목록
+    brand:            str              = ""  # 네이버 브랜드명
 
 
 # ================================================================
@@ -1124,6 +1125,7 @@ class NaverStoreCrawler:
         barcode       = self._get_barcode(node, raw)
         options       = self._get_options(raw)
         naver_cat     = self._get_naver_category(node, raw)
+        brand         = self._get_brand(node, raw)
 
         discounted = self._find_discounted_price(raw, sale_price)
         if discounted and discounted < sale_price:
@@ -1141,6 +1143,8 @@ class NaverStoreCrawler:
             print(f"[Crawler] barcode : {barcode}")
         if naver_cat:
             print(f"[Crawler] naver_cat: {naver_cat}")
+        if brand:
+            print(f"[Crawler] brand    : {brand}")
         # ── 옵션 없으면 WU API로 전용 option endpoint 호출 ──────────
         if not options and self.api_key:
             options = self._fetch_options_via_wu(pid)
@@ -1155,6 +1159,7 @@ class NaverStoreCrawler:
             name=name, price=price, delivery=delivery,
             image_url=img_url, raw_json=raw, barcode=barcode,
             naver_options=options, naver_category=naver_cat,
+            brand=brand,
         )
 
     def _fetch_options_via_wu(self, pid: str) -> list[NaverOption]:
@@ -1690,6 +1695,57 @@ class NaverStoreCrawler:
                         r = _search(item if isinstance(item, dict) else {}, depth + 1)
                         if r:
                             return r
+            return ""
+
+        return _search(raw, 0)
+
+    @staticmethod
+    def _get_brand(node: dict, raw: dict) -> str:
+        """
+        네이버 __PRELOADED_STATE__ 에서 브랜드명 추출.
+
+        탐색 우선순위:
+          1) node 직접 키 (brandName, brand, maker, manufacturer)
+          2) raw 전체 재귀 탐색
+        """
+        _BRAND_KEYS = (
+            "brandName", "brand", "brandInfo",
+            "maker", "manufacturer", "makerName",
+            "manufacturerName", "productBrand",
+        )
+
+        def _from_dict(d: dict) -> str:
+            for k in _BRAND_KEYS:
+                v = d.get(k)
+                if isinstance(v, str) and v.strip() and v.strip() not in ("", "없음", "해당없음"):
+                    return v.strip()
+                if isinstance(v, dict):
+                    inner = v.get("name") or v.get("brandName") or ""
+                    if inner and isinstance(inner, str):
+                        return inner.strip()
+            return ""
+
+        result = _from_dict(node)
+        if result:
+            return result
+
+        def _search(d, depth: int) -> str:
+            if not isinstance(d, dict) or depth > 5:
+                return ""
+            r = _from_dict(d)
+            if r:
+                return r
+            for v in d.values():
+                if isinstance(v, dict):
+                    r = _search(v, depth + 1)
+                    if r:
+                        return r
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict):
+                            r = _search(item, depth + 1)
+                            if r:
+                                return r
             return ""
 
         return _search(raw, 0)
