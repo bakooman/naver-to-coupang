@@ -2536,22 +2536,42 @@ class WingAutomator:
                 # 판매자배송 선택 후 확인 클릭 → 판매방식 저장. 그 후 상품등록 재클릭 필요.
                 _JS_HANDLE_RG_POPUP = """
                     () => {
-                        for (const btn of document.querySelectorAll('button')) {
-                            if (!btn.offsetParent) continue;
-                            const t = btn.textContent.trim();
-                            if (t !== '확인' && t !== '닫기') continue;
-                            let p = btn.parentElement;
+                        for (const confirmBtn of document.querySelectorAll('button')) {
+                            if (!confirmBtn.offsetParent) continue;
+                            const bt = confirmBtn.textContent.trim();
+                            if (bt !== '확인' && bt !== '닫기') continue;
+                            let p = confirmBtn.parentElement;
                             for (let d = 0; d < 10 && p && p !== document.body; d++) {
-                                if (p.textContent.includes('로켓그로스') &&
-                                    (p.textContent.includes('판매방식') ||
-                                     p.textContent.includes('판매 방식'))) {
-                                    /* 판매자배송 선택 */
-                                    for (const el of p.querySelectorAll('button, label, input[type="radio"]')) {
-                                        if (!el.offsetParent) continue;
-                                        const et = (el.textContent || el.getAttribute('value') || '').trim();
-                                        if (et === '판매자배송') { el.click(); break; }
+                                const pt = p.textContent;
+                                if (pt.includes('로켓그로스') &&
+                                    (pt.includes('판매방식') || pt.includes('판매 방식'))) {
+                                    /* 판매자배송 선택: radio input 먼저 시도 */
+                                    let selected = false;
+                                    for (const inp of p.querySelectorAll('input[type="radio"]')) {
+                                        const lbl = inp.closest('label') || inp.parentElement;
+                                        if (lbl && lbl.textContent.includes('판매자배송')) {
+                                            inp.click(); selected = true; break;
+                                        }
                                     }
-                                    btn.click();
+                                    if (!selected) {
+                                        /* TreeWalker로 정확한 텍스트 노드 "판매자배송" 탐색 */
+                                        const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+                                        let node;
+                                        while ((node = walker.nextNode())) {
+                                            if (node.textContent.trim() === '판매자배송') {
+                                                const el = node.parentElement;
+                                                if (el && el.offsetParent) { el.click(); selected = true; break; }
+                                            }
+                                        }
+                                    }
+                                    if (!selected) {
+                                        /* Fallback: visible leaf element with 판매자배송 text */
+                                        for (const el of p.querySelectorAll('button, label, span, div')) {
+                                            if (!el.offsetParent || el.children.length > 2) continue;
+                                            if (el.textContent.trim() === '판매자배송') { el.click(); selected = true; break; }
+                                        }
+                                    }
+                                    confirmBtn.click();
                                     return p.textContent.replace(/\s+/g,' ').trim().substring(0, 80);
                                 }
                                 p = p.parentElement;
@@ -2624,6 +2644,18 @@ class WingAutomator:
                                 p = p.parentElement;
                             }
                             if (isErr) continue;
+                            /* 로켓그로스 판매방식 선택 팝업 제외 — 전용 핸들러에서 처리 */
+                            {
+                                let pr = btn.parentElement; let isRG = false;
+                                for (let dr = 0; dr < 10 && pr && pr !== document.body; dr++) {
+                                    if (pr.textContent.includes('로켓그로스') &&
+                                        (pr.textContent.includes('판매방식') || pr.textContent.includes('판매 방식'))) {
+                                        isRG = true; break;
+                                    }
+                                    pr = pr.parentElement;
+                                }
+                                if (isRG) continue;
+                            }
                             btn.click();
                             return true;
                         }
@@ -2714,6 +2746,12 @@ class WingAutomator:
                         break
                     log(f"[Wing 판매요청] 🔄 로켓그로스 처리 후 2초 대기 → 상품등록 재클릭 (시도 {_rg_retry+1}/3, {inv_id})")
                     await asyncio.sleep(2)
+                    # RG 팝업 확인 클릭 직후 바로 등록 확인 팝업이 뜨는 경우 먼저 체크
+                    _c_early = await pg.evaluate(_JS_CLICK_CONFIRM)
+                    if _c_early:
+                        log(f"[Wing 판매요청] ✅ RG 처리 후 즉시 등록 확인 팝업 감지 → 클릭 ({inv_id})")
+                        _registered_by_confirm = True
+                        break
                     _rc2 = await pg.evaluate(_JS_CLICK_FOOTER)
                     if not _rc2:
                         log(f"[Wing 판매요청] ℹ️ 상품등록 footer 버튼 없음 — 이미 등록/페이지 전환 ({inv_id})")
