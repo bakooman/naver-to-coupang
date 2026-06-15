@@ -33,6 +33,8 @@ from typing import Optional
 
 # ── 기본 경로 ─────────────────────────────────────────────────────
 _DEFAULT_MAP_PATH = Path(__file__).parent.parent / "config" / "category_map.json"
+# 자동저장 항목 전용 파일 (gitignore 대상 — git 충돌 방지)
+_AUTO_MAP_PATH    = Path(__file__).parent.parent / "config" / "category_auto.json"
 _WING_CAT_FILES   = [
     Path(__file__).parent.parent / "config" / "wing_categories.json",
     Path(__file__).parent.parent / "config" / "wing_beauty_categories.json",
@@ -391,6 +393,7 @@ class CategoryDetector:
         return None
 
     def _load(self) -> None:
+        # 1) category_map.json (수동 관리 — git 동기화 대상)
         try:
             raw = json.loads(self._map_path.read_text(encoding="utf-8"))
             self._keywords = raw.get("keywords", {})
@@ -403,6 +406,23 @@ class CategoryDetector:
             print(f"[CategoryDetector] 매핑 파일 로드 오류: {e}")
             self._keywords = {}
 
+        # 2) category_auto.json (자동저장 — 수동 항목보다 낮은 우선순위)
+        try:
+            auto_raw = json.loads(_AUTO_MAP_PATH.read_text(encoding="utf-8"))
+            auto_kws = auto_raw.get("keywords", {})
+            added = 0
+            for kw, data in auto_kws.items():
+                if kw not in self._keywords:   # 수동 항목이 항상 우선
+                    self._keywords[kw] = data
+                    added += 1
+            if auto_kws:
+                print(f"[CategoryDetector] 자동저장 로드: category_auto.json "
+                      f"({added}개 추가, {len(auto_kws) - added}개 수동 항목에 가려짐)")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            print(f"[CategoryDetector] 자동저장 로드 오류 (무시): {e}")
+
     def get_name_by_id(self, category_id: str) -> str:
         """category_id로 wing_categories에서 카테고리 이름을 반환. 없으면 빈 문자열."""
         flat = _load_wing_flat()
@@ -412,20 +432,41 @@ class CategoryDetector:
         return ""
 
     def _save(self) -> None:
+        # [자동]/[네이버카테고리]/[Gemini] 접두 항목 → category_auto.json (gitignore)
+        # 그 외 수동 항목 → category_map.json (git 동기화)
+        _AUTO_PREFIXES = ("[자동]", "[네이버카테고리]", "[Gemini")
+        manual_kws: dict = {}
+        auto_kws:   dict = {}
+        for kw, data in self._keywords.items():
+            if any(kw.startswith(p) for p in _AUTO_PREFIXES):
+                auto_kws[kw] = data
+            else:
+                manual_kws[kw] = data
+
+        # category_map.json — 수동 항목만
         try:
-            # 기존 파일 구조 유지 (comment 등 보존)
             try:
                 raw = json.loads(self._map_path.read_text(encoding="utf-8"))
             except Exception:
                 raw = {}
-            raw["keywords"] = self._keywords
+            raw["keywords"] = manual_kws
             self._map_path.write_text(
                 json.dumps(raw, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            print(f"[CategoryDetector] 매핑 저장 완료: {self._map_path.name}")
         except Exception as e:
-            print(f"[CategoryDetector] 매핑 저장 오류: {e}")
+            print(f"[CategoryDetector] 매핑 저장 오류 (수동): {e}")
+
+        # category_auto.json — 자동저장 항목만
+        try:
+            _AUTO_MAP_PATH.write_text(
+                json.dumps({"keywords": auto_kws}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print(f"[CategoryDetector] 자동저장 저장 오류 (무시): {e}")
+
+        print(f"[CategoryDetector] 저장 완료: 수동 {len(manual_kws)}개 / 자동 {len(auto_kws)}개")
 
 
 # ── 전역 싱글턴 ────────────────────────────────────────────────────

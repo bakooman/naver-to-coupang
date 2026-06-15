@@ -1925,20 +1925,22 @@ async def _process_entry(
                     _brand_prompt = (
                         f"상품명: {product.name}\n"
                         f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
-                        "위 상품의 공식 제조사/브랜드명을 답하세요.\n"
-                        "⚠️ 상품명에 적힌 브랜드 표기가 틀렸을 수 있습니다. "
-                        "상품 내용을 종합해서 실제 제조사의 공식 브랜드명을 확인해 주세요.\n"
+                        "위 상품의 브랜드명을 쿠팡 Wing 등록 기준으로 답하세요.\n"
+                        "⚠️ 핵심 규칙: 상품명에 영문 브랜드명이 있으면 반드시 영문 브랜드를 우선 사용하세요.\n"
                         "규칙:\n"
-                        "- 브랜드명만 답하세요 (최대 30자, 한국어 또는 영문)\n"
-                        "- 제품 종류(샴푸/데오드란트/크림/오일/비타민 등)는 브랜드가 아닙니다\n"
-                        "- 수식어(휴대용/여성용/대용량/미국 등)는 브랜드가 아닙니다\n"
+                        "- 브랜드명만 답하세요 (최대 30자)\n"
+                        "- 상품명 안에 영문 브랜드 표기가 있으면 영문 원본 그대로 (한글 음역 금지)\n"
+                        "- 제품 종류(샴푸/영양제/크림/오일/비타민 등)는 브랜드가 아닙니다\n"
+                        "- 수식어(휴대용/여성용/대용량/소형견/반려견 등)는 브랜드가 아닙니다\n"
                         "- 브랜드를 알 수 없으면 '해당없음'\n"
-                        "예시: '미국 휴대용 데오드란트 여성용 수아브 트로피컬 시트러스' → 수아브\n"
-                        "예시: '고바야시제약 브레스케어 민트향 50정' → 고바야시제약\n"
-                        "예시: 'Dove 비타민C 비누 3개입' → Dove\n"
-                        "예시: '파워스틱 남성용 데오드란트 스틱' → POWERSTICK\n"
-                        "예시: '너드 말랑말랑 과일향 젤리 레인보우 구미 클러스터' → 너즈  (Nerds 공식 한국어명 '너즈', '너드' 아님)\n"
-                        "예시: '하리보 골드베렌 젤리 200g' → 하리보"
+                        "예시:\n"
+                        "  '사이노퀸 시노퀸 소형견 강아지 관절영양제 90 캡슐 Synoquin EFA' → SYNOQUIN\n"
+                        "  '새밀린 간기능 영양제 소형견 Samylin' → SAMYLIN\n"
+                        "  '고바야시제약 브레스케어 민트향 50정' → 고바야시제약\n"
+                        "  'Dove 비타민C 비누 3개입' → Dove\n"
+                        "  '파워스틱 남성용 데오드란트 스틱 PowerStick' → POWERSTICK\n"
+                        "  '너드 말랑말랑 과일향 젤리 레인보우 구미 클러스터' → 너즈\n"
+                        "  '하리보 골드베렌 젤리 200g' → 하리보"
                     )
                     _gresp_b = await loop.run_in_executor(
                         None, lambda: genai.GenerativeModel(_gm_b).generate_content(_brand_prompt)
@@ -1993,35 +1995,88 @@ async def _process_entry(
             except Exception as _be:
                 log_(f"[{entry.uid[:6]}] 브랜드 쿠팡DB 매칭 실패(무시): {_be}")
 
-        # ── 1-a. 카테고리 감지 (3단계) + Gemini 무조건 검증 ─────────
-        #
-        # 감지 단계 (수동 설정이 아닌 경우):
-        #   1순위: 상품명 키워드 매핑 (category_map.json)
-        #   2순위: 네이버 카테고리 경로 (wholeCategoryName 크롤링 추출)
-        #
-        # Gemini 검증 (수동 설정 아닌 경우 항상 실행):
-        #   - 카테고리 감지 성공 → "이 카테고리가 맞는가?" 검증 → 틀리면 교정
-        #   - 카테고리 미감지 → 직접 카테고리 키워드 제안 → wing_categories 검색
+        # ── 1-a. 카테고리 감지: Gemini 1순위 → 키워드 사전 2순위 → 네이버카테고리 3순위 ──
         detector = _get_detector()
 
         if product.naver_category:
             log_(f"[{entry.uid[:6]}] 네이버 카테고리: {product.naver_category}")
 
-        # ── 1순위: category_map.json 키워드 사전 매핑 ────────────────
-        detected_cat_id, detected_gosisi, detected_kw = detector.detect(
-            product.name, naver_category=product.naver_category
-        )
+        _gk_cat = getattr(_settings, "GEMINI_API_KEY", "")
+        _gm_cat = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
 
-        if detected_kw:
-            if not entry.category_is_manual:
-                entry.category_id = detected_cat_id
-            entry.gosisi_cat       = detected_gosisi
-            entry.detected_keyword = detected_kw
-            log_(f"[{entry.uid[:6]}] ✅ [1순위] 키워드 사전 감지: '{detected_kw}' → "
-                 f"ID={entry.category_id or '(미설정)'}")
+        # ── 1순위: Gemini — 전체 상품명으로 문맥 파악 후 카테고리 매핑 ──────
+        if not entry.category_is_manual and not entry.category_id and _gk_cat:
+            try:
+                import google.generativeai as _gc_genai
+                _gc_genai.configure(api_key=_gk_cat)
+                _gc_model = _gc_genai.GenerativeModel(_gm_cat)
+                _cat_primary_prompt = (
+                    f"상품명(전체): {product.name}\n"
+                    f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
+                    "이 상품에 맞는 쿠팡 Wing 카테고리 소분류 명칭을 1~3개 답하세요.\n\n"
+                    "⚠️ 핵심 규칙: 상품명/네이버카테고리에 강아지/고양이/소형견/대형견/"
+                    "반려견/반려묘/펫/pet 등 반려동물 키워드가 있으면\n"
+                    "절대 사람용 건강기능식품/비타민/영양제 카테고리 선택 금지."
+                    " 반드시 반려동물 전용 카테고리를 선택하세요.\n\n"
+                    "강아지 Wing 카테고리 소분류 예시:\n"
+                    "  관절/칼슘 보조제 → 칼슘/관절영양제\n"
+                    "  간기능/심장 보조제 → 심장/간기능\n"
+                    "  면역 보조제 → 면역\n"
+                    "  피부/모질 보조제 → 피부/모질\n"
+                    "  눈/귀 보조제 → 눈/귀 영양제\n"
+                    "  종합/오메가/EFA 영양제 → 영양제\n"
+                    "고양이 Wing 카테고리 소분류 예시:\n"
+                    "  관절 보조제 → 관절\n"
+                    "  방광/비뇨기 → 방광\n"
+                    "  종합 영양제 → 영양제\n"
+                    "강아지&고양이 겸용:\n"
+                    "  겸용 관절 보조제 → 강아지&고양이 관절영양제\n"
+                    "  겸용 영양제 → 강아지&고양이 영양제\n\n"
+                    "형식: 카테고리명1,카테고리명2,카테고리명3\n"
+                    "카테고리 명칭만 답하세요. 설명 금지."
+                )
+                log_(f"[{entry.uid[:6]}] [1순위] Gemini 카테고리 분석 중...")
+                _gc_resp = await loop.run_in_executor(
+                    None, lambda: _gc_model.generate_content(_cat_primary_prompt)
+                )
+                _gc_txt = (_gc_resp.text or "").strip()
+                if _gc_txt:
+                    _gc_candidates = [c.strip() for c in _gc_txt.split(",") if c.strip()]
+                    for _gc_cand in _gc_candidates:
+                        _gc_res = detector.search_by_keyword(_gc_cand)
+                        if not _gc_res:
+                            _gc_res = detector._fallback_wing_search(_gc_cand)
+                        if _gc_res:
+                            _gc_id, _gc_gcat, _gc_name = _gc_res
+                            if not entry.category_is_manual:
+                                entry.category_id = _gc_id
+                            entry.gosisi_cat       = _gc_gcat
+                            entry.detected_keyword = f"[Gemini1순위]{_gc_name}"
+                            log_(f"[{entry.uid[:6]}] ✅ [1순위] Gemini: '{_gc_cand}' → "
+                                 f"ID={entry.category_id} ({_gc_name})")
+                            break
+                    if not entry.category_id:
+                        log_(f"[{entry.uid[:6]}] ⚠ Gemini 후보 {_gc_candidates} wing 매핑 실패 → 키워드 사전으로")
+                else:
+                    log_(f"[{entry.uid[:6]}] ⚠ Gemini 응답 없음 → 키워드 사전으로")
+            except Exception as _gce:
+                log_(f"[{entry.uid[:6]}] ⚠ [1순위] Gemini 카테고리 분석 실패: {_gce}")
 
-        elif not entry.category_is_manual and not entry.category_id:
-            # ── 2순위: 네이버 카테고리 경로 → wing_categories 이름 검색 ──
+        # ── 2순위: 키워드 사전 (Gemini 실패/미매핑 시) ──────────────────
+        if not entry.category_is_manual and not entry.category_id:
+            _det_id, _det_gosisi, _det_kw = detector.detect(
+                product.name, naver_category=product.naver_category
+            )
+            if _det_kw:
+                entry.category_id      = _det_id
+                entry.gosisi_cat       = _det_gosisi
+                entry.detected_keyword = _det_kw
+                log_(f"[{entry.uid[:6]}] ✅ [2순위] 키워드 사전: '{_det_kw}' → ID={entry.category_id}")
+            else:
+                log_(f"[{entry.uid[:6]}] ⚠ [2순위] 키워드 사전도 미매핑")
+
+        # ── 3순위: 네이버 카테고리 경로 → wing_categories 이름 검색 ──
+        if not entry.category_is_manual and not entry.category_id:
             if product.naver_category:
                 _nc_parts = [p.strip() for p in _re.split(r'[>/]', product.naver_category) if p.strip()]
                 for _nc_kw in reversed(_nc_parts):
@@ -2033,269 +2088,13 @@ async def _process_entry(
                         entry.category_id      = _nc_id
                         entry.gosisi_cat       = _nc_gcat
                         entry.detected_keyword = f"[네이버카테고리]{_nc_matched}"
-                        log_(f"[{entry.uid[:6]}] ✅ [2순위] 네이버 카테고리 매핑: '{_nc_kw}' → ID={_nc_id}")
+                        log_(f"[{entry.uid[:6]}] ✅ [3순위] 네이버 카테고리: '{_nc_kw}' → ID={_nc_id}")
                         break
-
             if not entry.category_id:
-                log_(f"[{entry.uid[:6]}] ⚠ [1~2순위] 모두 실패 → Gemini 직접 매핑 시도")
-        else:
-            if entry.category_id:
-                log_(f"[{entry.uid[:6]}] ⚠ 키워드 미감지 — 수동입력 ID 사용: {entry.category_id}")
-            else:
-                log_(f"[{entry.uid[:6]}] ❌ 카테고리 미감지 & 수동입력 없음")
+                log_(f"[{entry.uid[:6]}] ❌ 카테고리 최종 미결정 — 카드에서 수동 입력하세요")
 
-        # ── [Gemini 검수] 1~2순위 자동 매핑 결과를 Gemini로 검증 ────────
-        # 잘못된 카테고리가 그대로 등록되는 오매핑 방지
-        # 예) "후추 분쇄기" → 분쇄기(가전) 오매핑 / "커피 그라인더" → 커피 오매핑
-        # ※ [자동] 접두사 없는 키워드 = category_map.json 수동 관리 항목 → 검수 불필요
-        _is_manual_kw = detected_kw and not detected_kw.startswith("[자동]") and not detected_kw.startswith("[네이버카테고리]")
-        _gk_verify = getattr(_settings, "GEMINI_API_KEY", "")
-        if (
-            entry.category_id
-            and not entry.category_is_manual
-            and detected_kw
-            and _gk_verify
-            and not _is_manual_kw
-        ):
-            try:
-                _cat_name_for_verify = detector.get_name_by_id(entry.category_id)
-                if _cat_name_for_verify:
-                    import google.generativeai as _gv_genai
-                    _gv_genai.configure(api_key=_gk_verify)
-                    _gv_model_name = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
-                    _gv_model = _gv_genai.GenerativeModel(_gv_model_name)
-                    _verify_prompt = (
-                        f"상품명(한국어): {product.name}\n"
-                        f"네이버 카테고리: {product.naver_category or '없음'}\n"
-                        f"자동 감지된 쿠팡 카테고리: {_cat_name_for_verify} (ID: {entry.category_id})\n"
-                        f"감지 키워드: {detected_kw}\n\n"
-                        "위 카테고리 매핑이 정확한지 판단하세요.\n"
-                        "정확하면 → 정확\n"
-                        "부정확하면 → 부정확,올바른카테고리명(예: 향신료그라인더,후추밀,커피그라인더)\n"
-                        "예시:\n"
-                        "  - '후추 분쇄기 그라인더' + 분쇄기(가전) → 부정확,후추그라인더\n"
-                        "  - '커피 그라인더' + 커피(식품) → 부정확,커피그라인더\n"
-                        "  - '캐스트롤 5W30 엔진오일' + 엔진오일 → 정확\n"
-                        "답변 형식만 준수하세요. 설명 금지."
-                    )
-                    log_(f"[{entry.uid[:6]}] 🔍 Gemini 카테고리 검수 중: {_cat_name_for_verify}...")
-                    _verify_resp = await loop.run_in_executor(
-                        None, lambda: _gv_model.generate_content(_verify_prompt)
-                    )
-                    _verify_txt = (_verify_resp.text or "").strip().lower()
-                    if _verify_txt.startswith("부정확"):
-                        # 틀린 카테고리 → 검수 실패, Gemini 재매핑으로 넘김
-                        _wrong_name = entry.category_id  # 로그용
-                        entry.category_id = ""
-                        entry.gosisi_cat  = "기타 재화"
-                        # 부정확 응답에서 올바른 카테고리 후보 추출
-                        _parts = (_verify_resp.text or "").strip().split(",", 1)
-                        _suggest = _parts[1].strip() if len(_parts) > 1 else ""
-                        log_(f"[{entry.uid[:6]}] ⚠ Gemini 검수 실패: {_cat_name_for_verify} → "
-                             f"'{_suggest or '재매핑'}' 으로 재시도")
-                        # 제안 카테고리로 즉시 재검색
-                        if _suggest:
-                            _corr = detector.search_by_keyword(_suggest)
-                            if not _corr:
-                                _corr = detector._fallback_wing_search(_suggest)
-                            if _corr:
-                                _corr_id, _corr_gc, _corr_nm = _corr
-                                entry.category_id      = _corr_id
-                                entry.gosisi_cat       = _corr_gc
-                                entry.detected_keyword = f"[Gemini검수]{_corr_nm}"
-                                log_(f"[{entry.uid[:6]}] ✅ Gemini 검수 보정: '{_cat_name_for_verify}' → "
-                                     f"'{_corr_nm}' (ID={_corr_id})")
-                    else:
-                        log_(f"[{entry.uid[:6]}] ✅ Gemini 검수 통과: {_cat_name_for_verify}")
-            except Exception as _gve:
-                log_(f"[{entry.uid[:6]}] ⚠ Gemini 카테고리 검수 오류 (무시): {_gve}")
-
-        # ── Gemini 폴백: 1~2순위 + 검수 후에도 category_id 없을 때 ──
-        if not entry.category_is_manual and not entry.category_id:
-            _gk = getattr(_settings, "GEMINI_API_KEY", "")
-            _gm = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
-            if _gk:
-                try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=_gk)
-                    _gclient = genai.GenerativeModel(_gm)
-
-                    # ── Wing 후보 목록 생성: 상품 도메인에 맞는 세분류 이름 추출 ──
-                    # 네이버 카테고리 + 상품명 키워드로 Wing DB에서 연관 경로 필터링
-                    def _get_wing_candidates(pname: str, naver_cat: str) -> str:
-                        _combined = f"{pname} {naver_cat}".lower()
-                        # 경로 키워드 → Wing DB path 필터
-                        _path_hints = []
-                        if any(w in _combined for w in ["커피", "coffee"]):
-                            _path_hints.append("커피")
-                        if any(w in _combined for w in ["녹차", "홍차", "보리차", "율무", "둥글레", "차"]):
-                            _path_hints.append("티/전통차")
-                        if any(w in _combined for w in ["음료", "주스", "드링크"]):
-                            _path_hints.append("음료")
-                        if any(w in _combined for w in ["과자", "스낵", "비스킷", "쿠키"]):
-                            _path_hints.append("과자")
-                        if any(w in _combined for w in ["라면", "국수", "파스타"]):
-                            _path_hints.append("면류")
-                        if any(w in _combined for w in ["세제", "샴푸", "비누", "치약"]):
-                            _path_hints.append("생활용품")
-                        if not _path_hints:
-                            return ""
-                        try:
-                            _flat = _load_wing_flat() if hasattr(detector, "_fallback_wing_search") else []
-                            from modules.category_detector import _load_wing_flat as _lwf
-                            _flat = _lwf()
-                            _candidates = []
-                            for _e in _flat:
-                                _epath = _e.get("path", "")
-                                _ename = _e.get("name", "")
-                                if not _ename or len(_ename) < 2:
-                                    continue
-                                if any(h in _epath for h in _path_hints):
-                                    _candidates.append(_ename)
-                            if _candidates:
-                                return "아래는 실제 쿠팡 Wing 카테고리 세분류 목록입니다. 이 중에서 선택하세요:\n" + ", ".join(_candidates[:60])
-                        except Exception:
-                            pass
-                        return ""
-
-                    _wing_hint = _get_wing_candidates(product.name, product.naver_category or "")
-
-                    # ── 프롬프트: Wing 후보 목록 포함 ──
-                    _cat_prompt = (
-                        f"상품명(한국어): {product.name}\n"
-                        f"네이버 카테고리 경로: {product.naver_category or '없음'}\n\n"
-                        + (_wing_hint + "\n\n" if _wing_hint else "")
-                        + "위 목록에서 이 상품에 가장 적합한 카테고리 명칭 후보를 3개 답하세요.\n"
-                        "반드시 위 목록에 있는 정확한 명칭 그대로 사용하세요 (변형 금지).\n"
-                        "목록이 없으면 쇼핑몰에서 쓰이는 표현으로 작성하세요.\n"
-                        "형식: 명칭1,명칭2,명칭3\n"
-                        "명칭만 답하세요. 설명·문장 금지."
-                    )
-                    log_(f"[{entry.uid[:6]}] [3순위] Gemini 카테고리 매핑 중...")
-
-                    _gresp = await loop.run_in_executor(
-                        None, lambda: _gclient.generate_content(_cat_prompt)
-                    )
-                    _gtxt = (_gresp.text or "").strip()
-
-                    if not _gtxt:
-                        log_(f"[{entry.uid[:6]}] ⚠ Gemini 응답 없음")
-                    else:
-                        # ── [수정] 파싱: 쉼표 분리 후 strip만 (split()[0] 제거) ──
-                        # 띄어쓰기 포함 명칭("오일 필터")이 잘리지 않도록 함
-                        _candidates = [c.strip() for c in _gtxt.split(",") if c.strip()]
-
-                        _gf_res = None
-                        _matched_kw = ""
-
-                        # Try 1: 각 후보를 유사도 기반 전용 검색으로 시도
-                        for _cat_kw in _candidates:
-                            _gf_res = detector.search_by_keyword(_cat_kw)
-                            if _gf_res:
-                                _matched_kw = _cat_kw
-                                break
-
-                        # Try 2: 유사도 검색 실패 시 기존 상품명 포함 방식도 병행
-                        if not _gf_res:
-                            log_(f"[{entry.uid[:6]}] ⚠ Gemini 유사도 검색 실패 → 상품명 포함 방식 재시도")
-                            for _cat_kw in _candidates:
-                                _gf_res = detector._fallback_wing_search(_cat_kw)
-                                if _gf_res:
-                                    _matched_kw = _cat_kw
-                                    break
-
-                        # Try 3: 모두 실패 시 Gemini에게 더 짧은 단어 재요청
-                        if not _gf_res:
-                            log_(f"[{entry.uid[:6]}] ⚠ Gemini 후보 {_candidates} 모두 wing 매핑 실패, 재요청...")
-                            try:
-                                _retry_prompt = (
-                                    f"상품명(한국어): {product.name}\n"
-                                    f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
-                                    "이 상품의 쇼핑몰 카테고리 명칭 후보를 5개 답하세요. "
-                                    "이번엔 더 짧고 일반적인 명칭 위주로 작성하세요.\n"
-                                    "형식: 명칭1,명칭2,명칭3,명칭4,명칭5\n"
-                                    "명칭만, 설명 금지."
-                                )
-                                _retry_resp = await loop.run_in_executor(
-                                    None, lambda: _gclient.generate_content(_retry_prompt)
-                                )
-                                # ── [수정] 쉼표 분리 + strip, split()[0] 제거 ──
-                                _retry_candidates = [
-                                    c.strip()
-                                    for c in (_retry_resp.text or "").strip().split(",")
-                                    if c.strip() and len(c.strip()) >= 2
-                                ]
-                                for _rw in _retry_candidates:
-                                    _rf_res = detector.search_by_keyword(_rw)
-                                    if not _rf_res:
-                                        _rf_res = detector._fallback_wing_search(_rw)
-                                    if _rf_res:
-                                        _rf_id, _rf_gcat, _rf_matched = _rf_res
-                                        entry.category_id      = _rf_id
-                                        entry.gosisi_cat       = _rf_gcat
-                                        entry.detected_keyword = f"[Gemini재시도]{_rf_matched}"
-                                        log_(f"[{entry.uid[:6]}] ✅ Gemini 재시도 매핑: '{_rw}' → ID={_rf_id}")
-                                        _gf_res = _rf_res
-                                        break
-                                if not entry.category_id:
-                                    log_(f"[{entry.uid[:6]}] ⚠ Gemini 재시도도 wing 매핑 실패")
-                            except Exception as _re2:
-                                log_(f"[{entry.uid[:6]}] ⚠ Gemini 재시도 오류: {_re2}")
-
-                        if _gf_res and not entry.category_id:
-                            _gf_id, _gf_gcat, _gf_matched = _gf_res
-                            entry.category_id      = _gf_id
-                            entry.gosisi_cat       = _gf_gcat
-                            entry.detected_keyword = f"[Gemini]{_gf_matched}"
-                            log_(f"[{entry.uid[:6]}] ✅ [3순위] Gemini 매핑: '{_matched_kw}' → "
-                                 f"ID={_gf_id} ({_gf_matched})")
-
-                        # ── [3순위] Gemini가 카테고리를 찾았으면 동일한 검수 로직 적용 ──
-                        if entry.category_id:
-                            try:
-                                _cv_name = detector.get_name_by_id(entry.category_id)
-                                if _cv_name:
-                                    _cv_prompt = (
-                                        f"상품명(한국어): {product.name}\n"
-                                        f"네이버 카테고리: {product.naver_category or '없음'}\n"
-                                        f"자동 감지된 쿠팡 카테고리: {_cv_name} (ID: {entry.category_id})\n\n"
-                                        "위 카테고리 매핑이 정확한지 판단하세요.\n"
-                                        "정확하면 → 정확\n"
-                                        "부정확하면 → 부정확,올바른카테고리명(예: 텐트,돔텐트,알파인텐트)\n"
-                                        "답변 형식만 준수하세요. 설명 금지."
-                                    )
-                                    log_(f"[{entry.uid[:6]}] 🔍 [3순위] Gemini 검수: {_cv_name}...")
-                                    _cv_resp = await loop.run_in_executor(
-                                        None, lambda: _gclient.generate_content(_cv_prompt)
-                                    )
-                                    _cv_txt = (_cv_resp.text or "").strip().lower()
-                                    if _cv_txt.startswith("부정확"):
-                                        _cv_parts = (_cv_resp.text or "").strip().split(",", 1)
-                                        _cv_suggest = _cv_parts[1].strip() if len(_cv_parts) > 1 else ""
-                                        log_(f"[{entry.uid[:6]}] ⚠ [3순위] 검수 실패: '{_cv_name}' → "
-                                             f"'{_cv_suggest or '재매핑'}' 재시도")
-                                        entry.category_id = ""
-                                        entry.gosisi_cat  = "기타 재화"
-                                        if _cv_suggest:
-                                            _cv_corr = detector.search_by_keyword(_cv_suggest)
-                                            if not _cv_corr:
-                                                _cv_corr = detector._fallback_wing_search(_cv_suggest)
-                                            if _cv_corr:
-                                                entry.category_id      = _cv_corr[0]
-                                                entry.gosisi_cat       = _cv_corr[1]
-                                                entry.detected_keyword = f"[Gemini검수]{_cv_corr[2]}"
-                                                log_(f"[{entry.uid[:6]}] ✅ [3순위] 검수 보정: "
-                                                     f"'{_cv_name}' → '{_cv_corr[2]}' (ID={_cv_corr[0]})")
-                                    else:
-                                        log_(f"[{entry.uid[:6]}] ✅ [3순위] 검수 통과: {_cv_name}")
-                            except Exception as _cve:
-                                log_(f"[{entry.uid[:6]}] ⚠ [3순위] 검수 오류 (무시): {_cve}")
-
-                except Exception as _gce:
-                    log_(f"[{entry.uid[:6]}] ⚠ Gemini 카테고리 매핑 실패: {_gce}")
-
-        if not entry.category_id and not entry.category_is_manual:
-            log_(f"[{entry.uid[:6]}] ❌ 카테고리 최종 미결정 — 카드에서 수동 입력하세요")
+        if entry.category_is_manual:
+            log_(f"[{entry.uid[:6]}] 🔒 카테고리 수동 고정: {entry.category_id}")
 
         # ── 1-a2. 가이드 기준 gosisi_cat 보정 (항상 덮어씀 — 구형 긴 문자열 자동 수정) ──
         if entry.category_id:
@@ -4541,7 +4340,8 @@ def _make_nav_header(current: str):
         else:
             _bat = str(Path(sys.argv[0]).resolve().parent / "run.bat")
             subprocess.Popen(
-                f'sleep 3 && git -C "{_cwd}" pull --rebase origin main && bash "{_bat}"',
+                f'sleep 3 && git -C "{_cwd}" checkout -- config/category_map.json'
+                f' && git -C "{_cwd}" pull --rebase origin main && bash "{_bat}"',
                 shell=True, cwd=_cwd, start_new_session=True,
             )
             await ui.run_javascript("window.close()")

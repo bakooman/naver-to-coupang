@@ -1,3 +1,6 @@
+# 서버 로컬 자동생성 파일 (git 충돌 방지)
+config/category_auto.json
+
 # 민감한 파일 - 절대 올리면 안됨
 .env
 ssh_keys/
