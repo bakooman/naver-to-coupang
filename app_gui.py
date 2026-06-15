@@ -6326,6 +6326,45 @@ def page() -> None:
                                 multiple=False,
                             ).props("accept=.txt flat dense color=teal")
 
+                            # ── 이전 대기목록 복원 버튼 ────────────────────────
+                            _restore_banner = ui.element("div").classes("w-full mt-2")
+                            def _check_restore_banner():
+                                try:
+                                    _pending_count = 0
+                                    if _QUEUE_STATE_FILE.exists():
+                                        import json as _rj
+                                        _rows = _rj.loads(_QUEUE_STATE_FILE.read_text(encoding="utf-8"))
+                                        _pending_count = sum(
+                                            1 for r in _rows
+                                            if isinstance(r, dict) and r.get("status") in ("pending", "processing", "error")
+                                        )
+                                    if _pending_count > 0 and not queue:
+                                        with _restore_banner:
+                                            with ui.row().classes("items-center gap-2 p-2 rounded").style(
+                                                "background:#1e3a5f; border:1px solid #3b82f6;"
+                                            ):
+                                                ui.label(f"💾 이전 대기목록 {_pending_count}개 저장됨").classes(
+                                                    "text-sm text-blue-300 flex-1"
+                                                )
+                                                async def _do_restore():
+                                                    restored = _restore_queue_from_state()
+                                                    if restored:
+                                                        queue.extend(restored)
+                                                        _render_queue()
+                                                        _restore_banner.clear()
+                                                        ui.notify(
+                                                            f"✅ 대기목록 {len(restored)}개 복원 완료 — 수집 시작 버튼을 누르세요",
+                                                            type="positive", timeout=5000,
+                                                        )
+                                                    else:
+                                                        ui.notify("복원할 항목이 없습니다.", type="warning")
+                                                ui.button("복원하기", icon="restore", on_click=_do_restore).props(
+                                                    "color=blue dense unelevated"
+                                                )
+                                except Exception:
+                                    pass
+                            _check_restore_banner()
+
                             # ── 엑셀 템플릿 (접힘 형태) ───────────────────────
                             ui.separator().classes("my-2")
                             with ui.expansion("📋 엑셀 템플릿 설정", icon="table_chart").props(
