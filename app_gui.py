@@ -4782,8 +4782,8 @@ def page_monitor() -> None:
                                                 ui.label(w.name or w.url[:60]).classes(
                                                     "text-sm font-semibold text-slate-700 truncate"
                                                 )
-                                            ui.label(w.url[:70]).classes(
-                                                "text-xs text-slate-400 font-mono truncate"
+                                            ui.link(w.url[:70], w.url, new_tab=True).classes(
+                                                "text-xs text-blue-400 font-mono truncate hover:underline"
                                             )
                                             chk = w.last_checked or "미체크"
                                             ui.label(
