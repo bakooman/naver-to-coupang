@@ -35,7 +35,6 @@ from modules.price_calculator import PriceCalculator
 from modules.image_uploader import upload_pil, upload_file, upload_url
 from modules.excel_builder import ExcelBuilder, BulkItem, Bundle
 from modules.category_detector import get_detector as _get_detector
-from modules.gtin_lookup import lookup as _gtin_lookup, lookup_with_retry as _gtin_lookup_retry
 from modules.wing_automator import run_bulk_publish_sync as _run_bulk_publish
 from modules.gemini_writer import generate_detail_image_url as _gemini_detail
 from modules.coupang_registrar import CoupangRegistrar
@@ -2250,77 +2249,68 @@ async def _process_entry(
                 pass
 
         if not entry.gtin:
-            # ④ 외부 DB 조회 — 쿼리 변형 다중 시도 + 재시도 포함
-            log_(f"[{entry.uid[:6]}] GTIN 외부 DB 조회 중 (다중 쿼리)...")
-            _looked = await loop.run_in_executor(
-                None, lambda: _gtin_lookup_retry(product.name, entry.brand or "", max_retries=2)
-            )
-            if _looked:
-                entry.gtin = _looked
-                log_(f"[{entry.uid[:6]}] ✅ GTIN 외부 DB 조회 성공: {entry.gtin}")
+            # ④ Gemini Google Search — 외부 DB 조회 제거 (100회/일 한도 낭비 방지)
+            log_(f"[{entry.uid[:6]}] GTIN Gemini 검색 시도...")
+            _gk_gtin = getattr(_settings, "GEMINI_API_KEY", "")
+            if _gk_gtin:
+                try:
+                    import google.genai as _genai_gtin
+                    import google.genai.types as _gtypes_gtin
+                    _gcli_gtin = _genai_gtin.Client(api_key=_gk_gtin)
+
+                    # raw_json에서 유용한 스펙 추출 (모델번호, 규격 등)
+                    _spec_lines: list[str] = []
+                    _SPEC_HINT_KEYS = {
+                        "modelNo", "modelNumber", "model", "itemNo",
+                        "manufacturer", "brand", "sku", "asin",
+                        "attributes", "specs", "weight", "volume",
+                    }
+                    def _extract_spec_hints(d: dict, depth: int = 0) -> None:
+                        if depth > 4 or not isinstance(d, dict):
+                            return
+                        for k, v in d.items():
+                            if any(hk.lower() in k.lower() for hk in _SPEC_HINT_KEYS):
+                                if isinstance(v, (str, int, float)) and str(v).strip():
+                                    _spec_lines.append(f"{k}: {str(v)[:80]}")
+                            elif isinstance(v, dict):
+                                _extract_spec_hints(v, depth + 1)
+                            elif isinstance(v, list):
+                                for item in v[:5]:
+                                    if isinstance(item, dict):
+                                        _extract_spec_hints(item, depth + 1)
+                    _extract_spec_hints(product.raw_json)
+                    _spec_str = "\n".join(_spec_lines[:10]) if _spec_lines else ""
+
+                    _gtin_prompt = (
+                        f"상품명: {product.name}\n"
+                        f"브랜드: {entry.brand or ''}\n"
+                        + (f"스펙 정보:\n{_spec_str}\n" if _spec_str else "")
+                        + "위 제품의 정확한 UPC 또는 EAN 바코드 번호(GTIN)를 "
+                        "인터넷에서 검색해 찾아주세요.\n"
+                        "찾은 바코드 번호를 숫자만 답하세요 "
+                        "(공백·하이픈 없이, 8~14자리).\n"
+                        "검색해도 확실한 바코드를 찾을 수 없으면 '없음'이라고만 답하세요."
+                    )
+                    _gr_gtin = _gcli_gtin.models.generate_content(
+                        model=getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash"),
+                        contents=[_gtypes_gtin.Part.from_text(text=_gtin_prompt)],
+                        config=_gtypes_gtin.GenerateContentConfig(
+                            tools=[_gtypes_gtin.Tool(
+                                google_search=_gtypes_gtin.GoogleSearch()
+                            )]
+                        ),
+                    )
+                    _gtin_raw = (_gr_gtin.text or "").strip()
+                    _gtin_digits = _re.sub(r"\D", "", _gtin_raw)
+                    if 8 <= len(_gtin_digits) <= 14 and _validate_barcode(_gtin_digits):
+                        entry.gtin = _gtin_digits
+                        log_(f"[{entry.uid[:6]}] ✅ GTIN Gemini 검색 성공: {entry.gtin}")
+                    else:
+                        log_(f"[{entry.uid[:6]}] GTIN Gemini 검색 실패 (응답: {_gtin_raw[:40]!r}) — 공란 등록")
+                except Exception as _ge_gtin:
+                    log_(f"[{entry.uid[:6]}] GTIN Gemini 검색 오류: {_ge_gtin} — 공란 등록")
             else:
-                # ⑤ Gemini 폴백 — 스펙/속성 정보 포함해 정확도 향상
-                log_(f"[{entry.uid[:6]}] GTIN 외부 DB 전부 실패 — Gemini 폴백 시도...")
-                _gk_gtin = getattr(_settings, "GEMINI_API_KEY", "")
-                if _gk_gtin:
-                    try:
-                        import google.genai as _genai_gtin
-                        import google.genai.types as _gtypes_gtin
-                        _gcli_gtin = _genai_gtin.Client(api_key=_gk_gtin)
-
-                        # raw_json에서 유용한 스펙 추출 (모델번호, 규격 등)
-                        _spec_lines: list[str] = []
-                        _SPEC_HINT_KEYS = {
-                            "modelNo", "modelNumber", "model", "itemNo",
-                            "manufacturer", "brand", "sku", "asin",
-                            "attributes", "specs", "weight", "volume",
-                        }
-                        def _extract_spec_hints(d: dict, depth: int = 0) -> None:
-                            if depth > 4 or not isinstance(d, dict):
-                                return
-                            for k, v in d.items():
-                                if any(hk.lower() in k.lower() for hk in _SPEC_HINT_KEYS):
-                                    if isinstance(v, (str, int, float)) and str(v).strip():
-                                        _spec_lines.append(f"{k}: {str(v)[:80]}")
-                                elif isinstance(v, dict):
-                                    _extract_spec_hints(v, depth + 1)
-                                elif isinstance(v, list):
-                                    for item in v[:5]:
-                                        if isinstance(item, dict):
-                                            _extract_spec_hints(item, depth + 1)
-                        _extract_spec_hints(product.raw_json)
-                        _spec_str = "\n".join(_spec_lines[:10]) if _spec_lines else ""
-
-                        _gtin_prompt = (
-                            f"상품명: {product.name}\n"
-                            f"브랜드: {entry.brand or ''}\n"
-                            + (f"스펙 정보:\n{_spec_str}\n" if _spec_str else "")
-                            + "위 제품의 정확한 UPC 또는 EAN 바코드 번호(GTIN)를 "
-                            "인터넷에서 검색해 찾아주세요.\n"
-                            "찾은 바코드 번호를 숫자만 답하세요 "
-                            "(공백·하이픈 없이, 8~14자리).\n"
-                            "검색해도 확실한 바코드를 찾을 수 없으면 '없음'이라고만 답하세요."
-                        )
-                        _gr_gtin = _gcli_gtin.models.generate_content(
-                            model=getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash"),
-                            contents=[_gtypes_gtin.Part.from_text(text=_gtin_prompt)],
-                            config=_gtypes_gtin.GenerateContentConfig(
-                                tools=[_gtypes_gtin.Tool(
-                                    google_search=_gtypes_gtin.GoogleSearch()
-                                )]
-                            ),
-                        )
-                        _gtin_raw = (_gr_gtin.text or "").strip()
-                        _gtin_digits = _re.sub(r"\D", "", _gtin_raw)
-                        if 8 <= len(_gtin_digits) <= 14 and _validate_barcode(_gtin_digits):
-                            entry.gtin = _gtin_digits
-                            log_(f"[{entry.uid[:6]}] ✅ GTIN Gemini 폴백 성공: {entry.gtin}")
-                        else:
-                            log_(f"[{entry.uid[:6]}] GTIN Gemini 폴백 실패 (응답: {_gtin_raw[:40]!r}) — 공란 등록")
-                    except Exception as _ge_gtin:
-                        log_(f"[{entry.uid[:6]}] GTIN Gemini 폴백 오류: {_ge_gtin} — 공란 등록")
-                else:
-                    log_(f"[{entry.uid[:6]}] GTIN 최종 미확보 — 공란 등록")
+                log_(f"[{entry.uid[:6]}] GTIN 최종 미확보 — 공란 등록")
 
         # ── 2. 이미지 가공 (누끼 + 수량별 합성) ──────────────────
         # 단일 등록 모드: 누끼·배지 없이 원본 이미지 직접 업로드
