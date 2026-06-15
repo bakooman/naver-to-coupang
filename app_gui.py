@@ -4477,8 +4477,10 @@ def _make_nav_header(current: str):
                     pass
         else:
             _bat = str(Path(sys.argv[0]).resolve().parent / "run.bat")
-            subprocess.Popen(f'sleep 3 && bash "{_bat}"', shell=True,
-                cwd=str(Path(sys.argv[0]).resolve().parent), start_new_session=True)
+            subprocess.Popen(
+                f'sleep 3 && git -C "{_cwd}" pull --rebase origin main && bash "{_bat}"',
+                shell=True, cwd=_cwd, start_new_session=True,
+            )
             await ui.run_javascript("window.close()")
             await asyncio.sleep(0.2)
         await asyncio.sleep(0.2)
