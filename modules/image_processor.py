@@ -23,11 +23,12 @@ from config.settings import Settings
 
 # ── 폰트 후보 (Windows → Linux 순) ──────────────────────────────
 _FONT_CANDIDATES = [
-    "C:/Windows/Fonts/malgunbd.ttf",    # 맑은 고딕 Bold  (Windows)
-    "C:/Windows/Fonts/malgun.ttf",      # 맑은 고딕       (Windows)
-    "C:/Windows/Fonts/gulim.ttc",       # 굴림             (Windows)
+    "C:/Windows/Fonts/malgun.ttf",      # 맑은 고딕 Regular (Windows)
+    "C:/Windows/Fonts/malgunbd.ttf",    # 맑은 고딕 Bold    (fallback)
+    "C:/Windows/Fonts/gulim.ttc",       # 굴림              (Windows)
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
 
 
