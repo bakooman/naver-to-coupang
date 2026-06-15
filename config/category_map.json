@@ -883,6 +883,234 @@
       "gosisi_cat": "가공식품",
       "priority": 16
     },
+    "── 반려동물 > 강아지/고양이 겸용 영양제 ────────────────────────────": {},
+    "강아지 고양이 관절영양제": {
+      "category_id": "104395",
+      "gosisi_cat": "기타 재화",
+      "priority": 50
+    },
+    "강아지 고양이 피부영양제": {
+      "category_id": "104396",
+      "gosisi_cat": "기타 재화",
+      "priority": 50
+    },
+    "강아지 고양이 간기능": {
+      "category_id": "104400",
+      "gosisi_cat": "기타 재화",
+      "priority": 50
+    },
+    "강아지 고양이 영양제": {
+      "category_id": "104394",
+      "gosisi_cat": "기타 재화",
+      "priority": 48
+    },
+    "강아지 고양이 영양": {
+      "category_id": "104394",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "소형견 반려묘": {
+      "category_id": "104394",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "반려견 반려묘": {
+      "category_id": "104394",
+      "gosisi_cat": "기타 재화",
+      "priority": 44
+    },
+    "for Dogs & Cats": {
+      "category_id": "104394",
+      "gosisi_cat": "기타 재화",
+      "priority": 42
+    },
+    "Dogs & Cats": {
+      "category_id": "104394",
+      "gosisi_cat": "기타 재화",
+      "priority": 38
+    },
+    "Dogs Cats": {
+      "category_id": "104394",
+      "gosisi_cat": "기타 재화",
+      "priority": 35
+    },
+    "간기능 영양제": {
+      "category_id": "104400",
+      "gosisi_cat": "기타 재화",
+      "priority": 42
+    },
+    "── 반려동물 > 강아지 영양제 ──────────────────────────────────────": {},
+    "강아지 관절영양제": {
+      "category_id": "65891",
+      "gosisi_cat": "기타 재화",
+      "priority": 48
+    },
+    "소형견 관절": {
+      "category_id": "65891",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "반려견 관절": {
+      "category_id": "65891",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "강아지 관절": {
+      "category_id": "65891",
+      "gosisi_cat": "기타 재화",
+      "priority": 44
+    },
+    "강아지 피부영양제": {
+      "category_id": "65892",
+      "gosisi_cat": "기타 재화",
+      "priority": 48
+    },
+    "강아지 피부 영양제": {
+      "category_id": "65892",
+      "gosisi_cat": "기타 재화",
+      "priority": 47
+    },
+    "강아지 간기능": {
+      "category_id": "65895",
+      "gosisi_cat": "기타 재화",
+      "priority": 46
+    },
+    "강아지 심장": {
+      "category_id": "65895",
+      "gosisi_cat": "기타 재화",
+      "priority": 44
+    },
+    "강아지 면역": {
+      "category_id": "65896",
+      "gosisi_cat": "기타 재화",
+      "priority": 44
+    },
+    "강아지 눈 영양": {
+      "category_id": "65894",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "강아지 귀 영양": {
+      "category_id": "65894",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "강아지 영양제": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 42
+    },
+    "강아지 영양": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 40
+    },
+    "소형견 영양제": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 42
+    },
+    "소형견 영양": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 40
+    },
+    "반려견 영양제": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 42
+    },
+    "for Dogs": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 32
+    },
+    "── 반려동물 > 고양이 영양제 ──────────────────────────────────────": {},
+    "고양이 관절영양제": {
+      "category_id": "66138",
+      "gosisi_cat": "기타 재화",
+      "priority": 48
+    },
+    "반려묘 관절": {
+      "category_id": "66138",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "고양이 관절": {
+      "category_id": "66138",
+      "gosisi_cat": "기타 재화",
+      "priority": 44
+    },
+    "고양이 피부영양제": {
+      "category_id": "66139",
+      "gosisi_cat": "기타 재화",
+      "priority": 48
+    },
+    "고양이 피부 영양제": {
+      "category_id": "66139",
+      "gosisi_cat": "기타 재화",
+      "priority": 47
+    },
+    "고양이 간기능": {
+      "category_id": "66142",
+      "gosisi_cat": "기타 재화",
+      "priority": 46
+    },
+    "고양이 심장": {
+      "category_id": "66142",
+      "gosisi_cat": "기타 재화",
+      "priority": 44
+    },
+    "고양이 면역": {
+      "category_id": "66144",
+      "gosisi_cat": "기타 재화",
+      "priority": 44
+    },
+    "고양이 방광": {
+      "category_id": "66145",
+      "gosisi_cat": "기타 재화",
+      "priority": 46
+    },
+    "반려묘 방광": {
+      "category_id": "66145",
+      "gosisi_cat": "기타 재화",
+      "priority": 46
+    },
+    "헤어볼 영양제": {
+      "category_id": "66136",
+      "gosisi_cat": "기타 재화",
+      "priority": 45
+    },
+    "헤어볼영양제": {
+      "category_id": "66136",
+      "gosisi_cat": "기타 재화",
+      "priority": 46
+    },
+    "고양이 영양제": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 42
+    },
+    "고양이 영양": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 40
+    },
+    "반려묘 영양제": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 42
+    },
+    "반려묘 영양": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 40
+    },
+    "for Cats": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 32
+    },
     "── 건강기능식품 ────────────────────────────────────────": {},
     "오메가3": {
       "category_id": "73134",
