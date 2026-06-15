@@ -989,6 +989,29 @@ class CoupangRegistrar:
     # 브랜드 검색 및 매칭
     # ────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _brand_names_match(a: str, b: str) -> bool:
+        """두 브랜드명이 같은 브랜드를 가리키는지 텍스트 유사도로 판별.
+        Korean↔English 동일 브랜드(나이키↔Nike)는 Gemini에 위임하므로 여기선 엄격하게 판별.
+        """
+        import re as _re
+        al, bl = a.strip().lower(), b.strip().lower()
+        if not al or not bl:
+            return False
+        if al == bl:
+            return True
+        # 포함 관계 (2자 이상인 짧은 쪽이 긴 쪽에 포함)
+        short, long_ = (al, bl) if len(al) <= len(bl) else (bl, al)
+        if len(short) >= 2 and short in long_:
+            return True
+        # 공통 의미 토큰 (공백·특수문자로 분리, 불용어 제외)
+        _stop = {'co', 'inc', 'ltd', 'corp', 'the', 'and', ''}
+        at = set(_re.split(r'[\s\-_/&.,()]+', al)) - _stop
+        bt = set(_re.split(r'[\s\-_/&.,()]+', bl)) - _stop
+        if at and bt and (at & bt):
+            return True
+        return False
+
     def search_brands(self, keyword: str) -> list[dict]:
         """
         쿠팡 브랜드 검색 API 호출.
@@ -1052,13 +1075,36 @@ class CoupangRegistrar:
 
         print(f"[Brand] 후보 {len(candidates)}개: {[c['brandName'] for c in candidates[:5]]}")
 
-        # 후보 1개이고 이름이 완전히 같으면(대소문자 무시) 바로 확정
+        # ── 후보 1개: 이름 유사도 검증 후 확정 ──────────────────────────────
+        # 버그: 이전에는 단일 후보를 이름 검증 없이 무조건 확정
+        # 예) "맥심" 검색 → "THOUGHT" 1개 반환 → "THOUGHT" 자동 확정 (오매핑)
         if len(candidates) == 1:
             matched = candidates[0]
-            print(f"[Brand] 단일 후보 확정: '{matched['brandName']}' (id={matched['brandId']})")
-            return matched["brandName"]
+            cand_name = matched["brandName"]
+            if self._brand_names_match(naver_brand, cand_name):
+                print(f"[Brand] 단일 후보 확정(이름일치): '{cand_name}' (id={matched['brandId']})")
+                return cand_name
+            # 이름 불일치 → Gemini로 2차 검증
+            if gemini_api_key:
+                from modules.gemini_writer import match_brand_with_gemini
+                g_matched = match_brand_with_gemini(
+                    naver_brand=naver_brand,
+                    coupang_candidates=candidates,
+                    api_key=gemini_api_key,
+                    model=gemini_model,
+                )
+                if g_matched:
+                    print(
+                        f"[Brand] 단일후보 Gemini 검증 성공: '{naver_brand}' → "
+                        f"'{g_matched['brandName']}' (id={g_matched['brandId']})"
+                    )
+                    return g_matched["brandName"]
+            print(
+                f"[Brand] 단일후보 '{cand_name}' 이름 불일치 → 직접입력: '{naver_brand}'"
+            )
+            return naver_brand
 
-        # 후보 여러 개 → Gemini 매칭
+        # ── 후보 여러 개 → Gemini 매칭 ──────────────────────────────────────
         if gemini_api_key:
             from modules.gemini_writer import match_brand_with_gemini
             matched = match_brand_with_gemini(
@@ -1075,7 +1121,12 @@ class CoupangRegistrar:
                 return matched["brandName"]
             print(f"[Brand] Gemini 매칭 실패(확신 없음) → 직접입력: '{naver_brand}'")
         else:
-            print("[Brand] Gemini API 키 없음 → 직접입력 폴백")
+            # Gemini 없을 때만 텍스트 매칭으로 폴백
+            for c in candidates:
+                if self._brand_names_match(naver_brand, c["brandName"]):
+                    print(f"[Brand] 텍스트 매칭 확정: '{c['brandName']}'")
+                    return c["brandName"]
+            print("[Brand] Gemini API 키 없음 + 텍스트 매칭 실패 → 직접입력 폴백")
 
         return naver_brand
 

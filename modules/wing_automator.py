@@ -101,6 +101,7 @@ class WingAutomator:
         self._br:  Optional[Browser]        = None
         self._ctx: Optional[BrowserContext] = None
         self._pg:  Optional[Page]           = None
+        self._log_cb = print  # bulk_publish_all에서 log_cb 연결 후 GUI 표시 가능
         import re as _re_slug
         _slug = _re_slug.sub(r'[^a-zA-Z0-9]', '_', username)[:32] if username else "default"
         self._session_path = (
@@ -135,11 +136,19 @@ class WingAutomator:
         self._pg  = await self._ctx.new_page()
 
     async def _close(self):
-        for o in (self._br, self._pw):
+        # Page / Context / Browser 순서대로 닫기
+        for o in (self._pg, self._ctx, self._br):
             try:
                 if o: await o.close()
             except Exception:
                 pass
+        # Playwright 인스턴스는 .stop() — .close()는 존재하지 않아 AttributeError 발생
+        # .stop() 없이 루프를 닫으면 Connection.run() 태스크가 좀비로 남아
+        # 다음 계정의 async_playwright().start()가 무한 hang함
+        try:
+            if self._pw: await self._pw.stop()
+        except Exception:
+            pass
 
     # ── 스크린샷 ──────────────────────────────────────────────────
 
@@ -176,47 +185,44 @@ class WingAutomator:
         return "xauth.coupang.com" in url or "openid-connect/auth" in url
 
     async def _ensure_login(self) -> bool:
+        log = self._log_cb
         pg = self._pg
-        print("[Wing] Wing 접속 중...")
+        log("[Wing] Wing 접속 중...")
         await pg.goto(WING_URL, wait_until="domcontentloaded", timeout=30_000)
         await asyncio.sleep(2)
 
         cur = pg.url
-        # xauth 리다이렉트 or 로그인 페이지 → 재로그인
         if self._is_auth_url(cur) or "login" in cur.lower():
-            print(f"[Wing] 로그인 필요 (URL: {cur[:80]})")
-            # 스테일 세션 삭제
+            log(f"[Wing] 로그인 필요 (URL: {cur[:80]})")
             if self._session_path.exists():
                 self._session_path.unlink()
-                print("[Wing] 스테일 세션 파일 삭제")
+                log("[Wing] 스테일 세션 파일 삭제")
             return await self._do_login()
 
         if await pg.locator(".wing-gnb, .gnb-menu, nav, [class*=sidebar]").count() > 0:
-            print("[Wing] 세션 유효 - 로그인 생략")
+            log("[Wing] 세션 유효 - 로그인 생략")
             return True
 
-        print("[Wing] 로그인 시작...")
+        log("[Wing] 로그인 시작...")
         return await self._do_login()
 
     async def _do_login(self) -> bool:
+        log = self._log_cb
         pg = self._pg
         try:
-            # Wing SSO는 자동화 봇 입력을 차단함 → 브라우저 창에서 수동 로그인 유도
             await pg.goto(WING_URL, wait_until="domcontentloaded", timeout=20_000)
             await asyncio.sleep(2)
 
             if not self._is_auth_url(pg.url) and "login" not in pg.url.lower():
-                print("[Wing] 이미 로그인 상태")
+                log("[Wing] 이미 로그인 상태")
                 return True
 
             await self._shot("01_login_page")
-            print("[Wing] 자동 로그인 시도 중...")
+            log("[Wing] 자동 로그인 시도 중...")
 
-            # 로그인 폼 로딩 대기 (Keycloak SPA 렌더링)
             await asyncio.sleep(2)
             await self._shot("01b_login_form")
 
-            # ── ID 입력 — Keycloak 표준 순서 ─────────────────────────
             _id_filled = False
             for sel in ["#username", "input[name='username']", "input[id='username']",
                         "input[placeholder*='아이디']", "input[placeholder*='ID']"]:
@@ -225,7 +231,7 @@ class WingAutomator:
                     if await loc.count() > 0:
                         await loc.first.click()
                         await loc.first.fill(self.username)
-                        print(f"[Wing] 아이디 입력 ({sel})")
+                        log(f"[Wing] 아이디 입력 ({sel})")
                         _id_filled = True
                         break
                 except Exception:
@@ -233,7 +239,6 @@ class WingAutomator:
 
             await asyncio.sleep(0.5)
 
-            # ── PW 입력 ──────────────────────────────────────────────
             _pw_filled = False
             for sel in ["#password", "input[name='password']", "input[id='password']",
                         "input[type='password']"]:
@@ -242,7 +247,7 @@ class WingAutomator:
                     if await loc.count() > 0:
                         await loc.first.click()
                         await loc.first.fill(self.password)
-                        print(f"[Wing] 비밀번호 입력 ({sel})")
+                        log("[Wing] 비밀번호 입력 완료")
                         _pw_filled = True
                         break
                 except Exception:
@@ -251,39 +256,37 @@ class WingAutomator:
             await self._shot("02_filled")
 
             if not _id_filled or not _pw_filled:
-                print(f"[Wing] ⚠️ 자동입력 실패 (id={_id_filled}, pw={_pw_filled}) — 브라우저 창에서 직접 로그인하세요")
+                log(f"[Wing] 자동입력 실패 (id={_id_filled}, pw={_pw_filled}) — headless 모드에서 재시도 불가")
             else:
                 await asyncio.sleep(0.5)
-                # ── 로그인 버튼 클릭 — Keycloak 표준 순서 ───────────────
                 for sel in ["#kc-login", "input[type='submit']", "button[type='submit']",
                             "button:has-text('로그인')", "button:has-text('Login')"]:
                     try:
                         loc = pg.locator(sel)
                         if await loc.count() > 0:
                             await loc.first.click()
-                            print(f"[Wing] 로그인 버튼 클릭 ({sel})")
+                            log(f"[Wing] 로그인 버튼 클릭 ({sel})")
                             break
                     except Exception:
                         continue
 
-            # ── 로그인 완료까지 URL 폴링 (최대 3분) ───────────────────
-            print("[Wing] 로그인 완료 대기 중 (최대 3분)...")
-            for i in range(90):   # 2초 × 90 = 3분
+            log("[Wing] 로그인 완료 대기 중 (최대 3분)...")
+            for i in range(90):
                 await asyncio.sleep(2)
                 cur = pg.url
                 if not self._is_auth_url(cur) and "login" not in cur.lower():
-                    print(f"[Wing] 로그인 성공 감지 ({(i+1)*2}초, URL: {cur[:60]})")
+                    log(f"[Wing] 로그인 성공 감지 ({(i+1)*2}초, URL: {cur[:60]})")
                     break
                 if i % 15 == 14:
-                    print(f"[Wing] 로그인 대기 중... {(i+1)*2}초 경과 (자동입력 실패 시 브라우저 창에서 직접 로그인하세요)")
+                    log(f"[Wing] 로그인 대기 중... {(i+1)*2}초 경과")
             else:
-                print("[Wing] 로그인 3분 타임아웃")
+                log("[Wing] 로그인 3분 타임아웃")
                 return False
 
             await asyncio.sleep(1)
             await self._shot("03_after_login")
             await self._save_session()
-            print("[Wing] 로그인 완료 — 세션 저장")
+            log("[Wing] 로그인 완료 — 세션 저장")
             return True
 
         except Exception as e:
@@ -1632,6 +1635,9 @@ class WingAutomator:
             if log_cb: log_cb(msg)
             else: print(msg)
 
+        # _ensure_login / _do_login 에서도 GUI 로그 출력되도록 연결
+        self._log_cb = log
+
         # ── 중복 실행 방지 ───────────────────────────────────────────────
         if _BULK_GUARD["running"]:
             log("⚠️ 자동판매 이미 실행 중 — 중복 실행 방지됨. 이전 작업 완료 후 재시도하세요.")
@@ -1749,45 +1755,102 @@ class WingAutomator:
         log(f"[Wing 판매요청] 현재 URL: {pg.url}")
         await self._shot("bulk_01_list")
 
-        # ── 2단계: 상단 "임시저장" 통계 카드 클릭 ──────────────────
-        # Wing의 상품 조회/수정 페이지에는 상단에 통계 카드(전체/아이템위너 아님/
-        # 품절/임시저장 등)가 있음. 클릭하면 목록이 해당 상태로 필터링됨.
-        draft_card_clicked: bool = await pg.evaluate("""
+        # ── 2단계: 임시저장 카드 숫자 읽기 + 클릭 ──────────────────
+        # Wing 상단 통계 카드에서 임시저장 개수를 먼저 읽어 0이면 즉시 종료.
+        # 클릭은 더 넓은 탐색(8단계 부모, 클릭 핸들러 있는 요소 포함)으로 시도.
+        _card_result: list = await pg.evaluate("""
             () => {
-                // 텍스트가 정확히 "임시저장"인 leaf 요소 찾기 (숫자 카드 레이블)
+                // "임시저장" 텍스트를 포함하는 leaf 요소 탐색
                 const leaves = Array.from(document.querySelectorAll('*')).filter(el =>
                     el.offsetParent !== null &&
                     el.children.length === 0 &&
                     el.textContent.trim() === '임시저장'
                 );
+                if (!leaves.length) return [null, false];
+
+                // 카드 숫자 읽기: leaf에서 위로 4단계 범위 innerText에서 숫자 추출
+                let draftCount = null;
                 for (const leaf of leaves) {
-                    // 클릭 가능한 부모 컨테이너(카드/버튼)를 찾아 클릭
+                    let p = leaf.parentElement;
+                    for (let i = 0; i < 4; i++) {
+                        if (!p) break;
+                        const txt = p.innerText || '';
+                        const m = txt.match(/(\\d+)/);
+                        if (m) { draftCount = parseInt(m[1]); break; }
+                        p = p.parentElement;
+                    }
+                    if (draftCount !== null) break;
+                }
+
+                // 클릭: 8단계 부모에서 a/button/onClick/card 계열 요소 탐색
+                for (const leaf of leaves) {
                     let target = leaf;
-                    for (let i = 0; i < 5; i++) {
+                    for (let i = 0; i < 8; i++) {
                         if (!target.parentElement) break;
                         target = target.parentElement;
                         const tag = target.tagName.toLowerCase();
-                        const cls = target.className || '';
-                        if (tag === 'a' || tag === 'button' ||
+                        const cls = (target.className || '').toString();
+                        const hasClick = typeof target.onclick === 'function'
+                            || target.getAttribute('onclick');
+                        if (tag === 'a' || tag === 'button' || hasClick ||
                             cls.includes('card') || cls.includes('item') ||
-                            cls.includes('status') || cls.includes('badge')) {
+                            cls.includes('status') || cls.includes('badge') ||
+                            cls.includes('filter') || cls.includes('tab')) {
                             target.click();
-                            return true;
+                            return [draftCount, true];
                         }
                     }
-                    // 적절한 부모 못 찾으면 leaf의 부모 클릭
-                    leaf.parentElement && leaf.parentElement.click();
-                    return true;
+                    // 적절한 부모 못 찾으면 4번째 부모 클릭 (fallback)
+                    let fb = leaf;
+                    for (let i = 0; i < 4; i++) { if (fb.parentElement) fb = fb.parentElement; }
+                    fb.click();
+                    return [draftCount, true];
                 }
-                return false;
+                return [draftCount, false];
             }
         """)
+        _draft_count = _card_result[0]   # int or null
+        draft_card_clicked: bool = _card_result[1]
+
+        log(f"[Wing 판매요청] 임시저장 카드 — 개수: {_draft_count}, 클릭: {draft_card_clicked}")
+
+        # 카드 숫자가 0 → 임시저장 상품 없음, 즉시 종료
+        if _draft_count == 0:
+            log("[Wing 판매요청] 임시저장 상품 0개 — 건너뜀")
+            return {"published": 0, "skipped": 0, "errors": []}
 
         if draft_card_clicked:
-            log("[Wing 판매요청] 임시저장 카드 클릭 — 목록 필터링 대기 중...")
-            await asyncio.sleep(4)
+            log("[Wing 판매요청] 임시저장 카드 클릭 — URL 변경 대기 중...")
+            _filter_url: str = ""
+            for _fw in range(16):
+                await asyncio.sleep(0.5)
+                if "productStatus" in pg.url or "TEMP_SAVE" in pg.url or "DRAFT" in pg.url:
+                    _filter_url = pg.url
+                    log(f"[Wing 판매요청] 필터 URL 확인: {_filter_url}")
+                    break
+            else:
+                log("[Wing 판매요청] 카드 클릭 후 URL 미변경 — URL 직접 이동으로 전환")
+
+            # 확정된 URL로 재이동해서 DRAFT 필터 결과가 완전히 로딩되도록 보장
+            _goto_url = _filter_url or f"{WING_URL}/vendor-inventory/list?productStatus=DRAFT"
+            try:
+                await pg.goto(_goto_url, wait_until="networkidle", timeout=25_000)
+            except Exception:
+                await pg.goto(_goto_url, wait_until="domcontentloaded", timeout=20_000)
+            await asyncio.sleep(2)
+            log(f"[Wing 판매요청] DRAFT 필터 페이지 재로드 완료: {pg.url}")
         else:
-            log("[Wing 판매요청] 임시저장 카드 미발견 — 전체 목록에서 탐색")
+            log("[Wing 판매요청] 임시저장 카드 클릭 실패 — URL 직접 필터 시도")
+            for _status in ["DRAFT", "TEMP_SAVE"]:
+                try:
+                    _furl = f"{WING_URL}/vendor-inventory/list?productStatus={_status}"
+                    await pg.goto(_furl, wait_until="networkidle", timeout=25_000)
+                    await asyncio.sleep(2)
+                    if not self._is_auth_url(pg.url):
+                        log(f"[Wing 판매요청] 직접 필터 URL 이동: {_furl}")
+                        break
+                except Exception:
+                    pass
 
         await self._shot("bulk_02_draft_tab")
 
@@ -1799,16 +1862,38 @@ class WingAutomator:
         # ── 임시저장 상품 링크(vendorInventoryId) 수집 ───────────────
         # Wing 목록 페이지의 상품 행은 DOM에 지연 렌더링됨 → 스크롤로 강제 로딩
         log("[Wing 판매요청] 상품 목록 로딩 대기 중 (스크롤)...")
-        for _ in range(4):
+        for _ in range(6):
             await pg.evaluate("() => window.scrollBy(0, 600)")
             await asyncio.sleep(1)
         await pg.evaluate("() => window.scrollTo(0, 0)")
         await asyncio.sleep(1)
 
+        # 목록 페이지에서 "임시저장" 상태 텍스트 존재 여부를 먼저 확인
+        # → 0개면 50개 상품 하나씩 방문하는 낭비 방지
+        _page_has_draft: bool = await pg.evaluate("""
+            () => {
+                const bodyText = document.body ? document.body.innerText : '';
+                // "검색 결과가 없습니다" 또는 "상품이 없습니다" 메시지 확인
+                const EMPTY_MSGS = ['검색 결과가 없습니다', '상품이 없습니다', '등록된 상품이 없습니다',
+                                    'No results', 'No products'];
+                if (EMPTY_MSGS.some(m => bodyText.includes(m))) return false;
+                // 목록 내 임시저장 상태 배지 확인
+                const leaves = Array.from(document.querySelectorAll('*')).filter(el =>
+                    el.offsetParent !== null && el.children.length === 0
+                );
+                return leaves.some(el => el.textContent.trim() === '임시저장');
+            }
+        """)
+        if not _page_has_draft:
+            log("[Wing 판매요청] 목록 페이지에 임시저장 상품 없음 — 종료")
+            await self._shot("bulk_99_done")
+            return {"published": 0, "skipped": 0, "errors": []}
+
         inv_ids: list[str] = await pg.evaluate("""
             () => {
-                // vendorInventoryId 가 포함된 모든 링크 수집
-                const links = Array.from(document.querySelectorAll('a[href]'));
+                // 메인 목록 테이블/컨테이너 안의 링크만 수집 (사이드바 등 제외)
+                // Wing 목록 행: modify 링크만 포함 (view 링크 제외)
+                const links = Array.from(document.querySelectorAll('a[href*="vendor-inventory/modify"]'));
                 const ids = links
                     .map(a => { const m = a.href.match(/vendorInventoryId=(\\d+)/); return m?.[1]; })
                     .filter(Boolean);
@@ -1857,6 +1942,60 @@ class WingAutomator:
             except Exception:
                 pass
             await asyncio.sleep(3)
+
+            # ── 상품 상태 확인: 임시저장이 아니면 건너뜀 ──────────────
+            _prod_status: str = await pg.evaluate("""
+                () => {
+                    // Wing 수정 페이지의 상태 배지/텍스트 탐색
+                    for (const el of document.querySelectorAll('*')) {
+                        if (!el.offsetParent || el.children.length > 0) continue;
+                        const t = el.textContent.trim();
+                        if (['심사중', '판매중', '판매종료', '판매중지', '반려'].includes(t))
+                            return t;
+                    }
+                    return '';
+                }
+            """)
+            if _prod_status:
+                log(f"[Wing 판매요청] ⏭ 임시저장 아님 (상태: {_prod_status}) — 건너뜀 ({inv_id})")
+                skipped += 1
+                continue
+
+            # ── 로켓그로스 판매방식 선택 팝업 사전 처리 ─────────────────
+            # Wing이 "판매 방식에 로켓그로스가 추가되었습니다" 팝업을 추가함.
+            # 이 팝업에서 판매자배송을 선택하지 않으면 상품등록이 실제로 반영 안 됨.
+            _rg_result = await pg.evaluate("""
+                () => {
+                    const body = document.body.innerText || '';
+                    if (!body.includes('로켓그로스')) return 'no_popup';
+                    // 판매자배송 버튼/라디오/레이블 클릭
+                    let sel = false;
+                    for (const el of document.querySelectorAll('button, label, input[type="radio"]')) {
+                        if (!el.offsetParent) continue;
+                        const t = (el.textContent || el.getAttribute('value') || '').trim();
+                        if (t === '판매자배송') { el.click(); sel = true; break; }
+                    }
+                    // 팝업 내 확인 버튼 클릭
+                    for (const btn of document.querySelectorAll('button')) {
+                        if (!btn.offsetParent) continue;
+                        const t = btn.textContent.trim();
+                        if (t === '확인' || t === '닫기') {
+                            let p = btn.parentElement;
+                            for (let d = 0; d < 10 && p && p !== document.body; d++) {
+                                if (p.textContent.includes('로켓그로스')) {
+                                    btn.click();
+                                    return sel ? '판매자배송 선택 후 확인' : '확인만 클릭';
+                                }
+                                p = p.parentElement;
+                            }
+                        }
+                    }
+                    return sel ? '판매자배송만 선택' : 'popup_found_no_btn';
+                }
+            """)
+            if _rg_result != 'no_popup':
+                log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 처리: {_rg_result} ({inv_id})")
+                await asyncio.sleep(1)
 
             # ── 상품등록 버튼 완전 활성화 대기 (최대 8초 폴링) ──────────
             # Wing SPA 렌더링이 느릴 때 버튼이 disabled 상태로 클릭되어
@@ -2321,9 +2460,10 @@ class WingAutomator:
             else:
                 log(f"[Wing 판매요청] ⚠️ 옵션 가격 로딩 대기 초과 ({inv_id}) — 강제 진행")
 
-            submit_handle = await pg.evaluate_handle("""
+            _FIND_SUBMIT_JS = """
                 () => {
                     const btns = Array.from(document.querySelectorAll('button'));
+                    // 1순위: fixed/sticky 조상을 가진 상품등록 버튼
                     for (const btn of btns) {
                         if (btn.textContent.trim() !== '상품등록') continue;
                         let el = btn;
@@ -2333,16 +2473,35 @@ class WingAutomator:
                             el = el.parentElement;
                         }
                     }
+                    // 2순위: 임시 저장 버튼 근방
                     const draftIdx = btns.findIndex(b => b.textContent.trim() === '임시 저장');
                     if (draftIdx >= 0) {
                         for (let i = draftIdx + 1; i < Math.min(draftIdx + 5, btns.length); i++) {
                             if (btns[i].textContent.trim() === '상품등록') return btns[i];
                         }
                     }
-                    return null;
+                    // 3순위: visible 상태인 아무 상품등록 버튼
+                    const anyBtn = btns.find(
+                        b => b.textContent.trim() === '상품등록'
+                          && !b.disabled
+                          && b.offsetParent !== null
+                    );
+                    return anyBtn || null;
                 }
-            """)
+            """
+            submit_handle = await pg.evaluate_handle(_FIND_SUBMIT_JS)
             el = submit_handle.as_element()
+
+            # 버튼 미발견 시 최대 2회 재시도 (페이지 느린 로딩 대응)
+            if not el:
+                for _btn_retry in range(2):
+                    await asyncio.sleep(3)
+                    log(f"[Wing 판매요청] ⚠️ 상품등록 버튼 미발견 — {_btn_retry+1}회 재탐색 ({inv_id})")
+                    submit_handle = await pg.evaluate_handle(_FIND_SUBMIT_JS)
+                    el = submit_handle.as_element()
+                    if el:
+                        break
+
             if el:
                 try:
                     await el.click()
@@ -2389,13 +2548,22 @@ class WingAutomator:
                             let p = btn.parentElement;
                             for (let d = 0; d < 8 && p && p !== document.body; d++) {
                                 if (ERR_KW.some(k => p.textContent.includes(k))) {
+                                    /* 로켓그로스 팝업이면 판매자배송 먼저 선택 */
+                                    if (p.textContent.includes('로켓그로스')) {
+                                        for (const el of p.querySelectorAll('button, label, input[type="radio"]')) {
+                                            if (!el.offsetParent) continue;
+                                            const et = (el.textContent || el.getAttribute('value') || '').trim();
+                                            if (et === '판매자배송') { el.click(); break; }
+                                        }
+                                    }
+                                    const msg = p.textContent.replace(/\s+/g,' ').trim().substring(0, 120);
                                     btn.click();
-                                    return true;
+                                    return msg;
                                 }
                                 p = p.parentElement;
                             }
                         }
-                        return false;
+                        return '';
                     }
                 """
 
@@ -2470,7 +2638,7 @@ class WingAutomator:
                     _dismissed = await pg.evaluate(_JS_DISMISS_ERR)
                     if _dismissed:
                         _err_first = True
-                        log(f"[Wing 판매요청] ⚠️ 에러 팝업 즉시 감지 → 확인 클릭 ({inv_id})")
+                        log(f"[Wing 판매요청] ⚠️ 에러 팝업 즉시 감지 → 확인 클릭 ({inv_id}) 내용: {_dismissed}")
                         break
                     # ② 정상 확인 팝업 확인
                     _confirmed = await pg.evaluate(_JS_CLICK_CONFIRM)
@@ -2499,7 +2667,7 @@ class WingAutomator:
                             # 에러 팝업 다시 뜨면 즉시 닫고 실패 처리
                             _err_again = await pg.evaluate(_JS_DISMISS_ERR)
                             if _err_again:
-                                log(f"[Wing 판매요청] ❌ 재시도 후에도 에러 팝업 ({inv_id})")
+                                log(f"[Wing 판매요청] ❌ 재시도 후에도 에러 팝업 ({inv_id}) 내용: {_err_again}")
                                 errors.append(f"등록실패(에러지속)({prod_name[:25]}): 옵션항목오류지속")
                                 await self._shot(f"bulk_fail_{inv_id}")
                                 _skip_item = True
@@ -2524,6 +2692,11 @@ class WingAutomator:
                 # ── API 201 성공 감지: 에러 팝업 여부와 무관하게 실제 등록 완료 확인 ─
                 _api_registered = any(c.get("status") == 201 for c in api_calls)
                 if _api_registered:
+                    # 에러 팝업이 있었어도 실제 등록됐으면 오류 목록에서 제거
+                    if _skip_item and errors and any(
+                        k in errors[-1] for k in ("등록실패(에러지속)", "등록실패(버튼미발견)")
+                    ):
+                        errors.pop()
                     published += 1
                     if prod_name:
                         published_names.append(prod_name)

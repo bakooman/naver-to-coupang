@@ -365,6 +365,17 @@ class NaverStoreCrawler:
             )
 
         product = self._build(url, store, pid, raw)
+
+        # ── UNIT_QUANTITY_PAID이지만 bundle_unit 미확인 → Playwright DOM 추출 ─
+        # __PRELOADED_STATE__ 에는 bundle count 가 없음 (JS 렌더링 후에만 노출)
+        if (product.delivery.fee_type == "UNIT_QUANTITY_PAID"
+                and product.delivery.bundle_unit is None):
+            _bu = await self._fetch_bundle_unit_playwright(url)
+            if _bu:
+                product.delivery.bundle_unit = _bu
+                product.delivery.bundle_fee  = product.delivery.base_fee
+                print(f"[Crawler] bundle  : Playwright 추출 — {_bu}개마다 {product.delivery.base_fee:,}원")
+
         product.local_image_path = await self._download_image(
             product.image_url, product.product_id
         )
@@ -914,6 +925,70 @@ class NaverStoreCrawler:
             finally:
                 await browser.close()
 
+    async def _fetch_bundle_unit_playwright(self, url: str) -> Optional[int]:
+        """
+        UNIT_QUANTITY_PAID 배송비의 'N개마다' 단위를 Playwright DOM에서 추출.
+        __PRELOADED_STATE__ 에는 이 값이 없고, React 앱이 API 호출 후 DOM에만 노출됨.
+        """
+        try:
+            from playwright.async_api import async_playwright  # type: ignore
+        except ImportError:
+            print("[Crawler] Playwright 미설치 — bundle_unit 추출 불가")
+            return None
+
+        print(f"[Crawler] UNIT_QUANTITY_PAID bundle_unit 미확인 — Playwright DOM 추출 시작")
+        try:
+            async with async_playwright() as _pw:
+                _br = await _pw.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+                )
+                _ctx = await _br.new_context(
+                    user_agent=self._HEADERS["User-Agent"],
+                    locale="ko-KR",
+                    timezone_id="Asia/Seoul",
+                    viewport={"width": 1280, "height": 800},
+                )
+                _pg = await _ctx.new_page()
+                try:
+                    await _pg.goto(url.split("?")[0], wait_until="domcontentloaded", timeout=25_000)
+
+                    # React 앱이 배송비 텍스트 렌더링할 때까지 최대 12초 대기
+                    try:
+                        await _pg.wait_for_function(
+                            r"() => /\d+\s*개\s*마다\s*부과/.test(document.body.innerText)",
+                            timeout=12_000,
+                        )
+                    except Exception:
+                        await asyncio.sleep(3)  # 타임아웃 시 3초 추가 대기 후 시도
+
+                    # DOM innerText 에서 추출
+                    _result = await _pg.evaluate(r"""
+                        () => {
+                            const t = document.body ? document.body.innerText : '';
+                            const m = t.match(/(\d+)\s*개\s*마다\s*부과/);
+                            return m ? parseInt(m[1], 10) : null;
+                        }
+                    """)
+                    if _result:
+                        print(f"[Crawler] bundle_unit DOM innerText 추출: {_result}")
+                        return int(_result)
+
+                    # innerText 실패 시 page HTML 에서 재시도
+                    _html = await _pg.content()
+                    _m = re.search(r"(\d+)\s*개\s*마다\s*부과", _html)
+                    if _m:
+                        print(f"[Crawler] bundle_unit HTML 추출: {_m.group(1)}")
+                        return int(_m.group(1))
+
+                    print("[Crawler] bundle_unit Playwright 추출 실패 — 텍스트 미발견")
+                    return None
+                finally:
+                    await _br.close()
+        except Exception as _e:
+            print(f"[Crawler] bundle_unit Playwright 오류: {_e}")
+            return None
+
     @staticmethod
     def _install_chromium() -> bool:
         try:
@@ -1034,6 +1109,10 @@ class NaverStoreCrawler:
                 data, _ = decoder.raw_decode(text_clean, 0)
                 if isinstance(data, dict):
                     print("[Parser] __PRELOADED_STATE__ 파싱 성공")
+                    # HTML 텍스트에서 "N개 마다 부과" 힌트 주입 (JSON 키 탐색 실패 시 사용)
+                    _bm_pre = re.search(r"(\d+)\s*개\s*마다\s*부과", html)
+                    if _bm_pre:
+                        data["_html_bundle_unit"] = int(_bm_pre.group(1))
                     return data
             except json.JSONDecodeError as _jde:
                 print(f"[Parser] __PRELOADED_STATE__ raw_decode 실패: {_jde}")
@@ -1052,6 +1131,10 @@ class NaverStoreCrawler:
                 try:
                     result = decoder_fn(raw_str)
                     print("[Parser] __PRELOADED_STATE__ JSON.parse 파싱 성공")
+                    if isinstance(result, dict):
+                        _bm_pre2 = re.search(r"(\d+)\s*개\s*마다\s*부과", html)
+                        if _bm_pre2:
+                            result["_html_bundle_unit"] = int(_bm_pre2.group(1))
                     return result
                 except Exception:
                     pass
@@ -1104,11 +1187,21 @@ class NaverStoreCrawler:
         if _price_int > 0 and _raw_name:
             print(f"[Parser] meta-tag fallback: name={_raw_name[:40]}  price={_price_int}")
             print("[Parser] WARNING: 배송비 정보 없음 — __PRELOADED_STATE__ 파싱 실패")
+            # HTML 텍스트에서 "N개 마다 부과" 패턴 추출 → _html_bundle_unit 힌트로 저장
+            _html_bundle: dict = {}
+            _bm = re.search(r"(\d+)\s*개\s*마다\s*부과", html)
+            if _bm:
+                _html_bundle["_html_bundle_unit"] = int(_bm.group(1))
             return {"product": {
                 "productName":            _raw_name,
                 "salePrice":              _price_int,
                 "representativeImageUrl": _og_image,
-            }}
+            }, **_html_bundle}
+
+        # HTML 텍스트에서 bundle hint 추출 후 raw에 병합 (최후 수단)
+        _bm2 = re.search(r"(\d+)\s*개\s*마다\s*부과", html)
+        if _bm2:
+            return {"_html_bundle_unit": int(_bm2.group(1))}
 
         return None
 
@@ -1558,24 +1651,24 @@ class NaverStoreCrawler:
         bundle_unit: Optional[int] = None
         bundle_fee:  Optional[int] = None
 
+        # ── bundle 단위 탐색 공통 키 목록 ────────────────────────────
+        _BUNDLE_UNIT_KEYS = (
+            "deliveryFeeGroupCount", "perBundleCount", "unitQuantity",
+            "quantityPerDelivery", "bundleCount", "deliveryUnitCount",
+            "feeGroupCount", "groupCount", "unitCount",
+        )
+
         if fee_type == "UNIT_QUANTITY_PAID":
             # 수량 단위마다 배송비 부과 (예: 12개마다 3,000원)
-            # 단위 수량 키를 순서대로 탐색
-            raw_u = (
-                info.get("deliveryFeeGroupCount") or
-                info.get("perBundleCount") or
-                info.get("unitQuantity") or
-                info.get("quantityPerDelivery") or
-                info.get("bundleCount")
-            )
+            raw_u = next((info.get(k) for k in _BUNDLE_UNIT_KEYS if info.get(k)), None)
             if raw_u is not None:
                 bundle_unit = int(raw_u)
-                bundle_fee  = base_fee   # 단위마다 base_fee 만큼 추가
-            # differentialFeeByArea 텍스트에서 수량 추출 시도 (예: "12개마다")
+                bundle_fee  = base_fee
+            # 텍스트 필드에서 "N개마다" 패턴 추출
             if bundle_unit is None:
                 _txt = str(info.get("differentialFeeByArea", "") or
                            info.get("feeByArea", "") or "")
-                _m = re.search(r"(\d+)\s*개마다", _txt)
+                _m = re.search(r"(\d+)\s*개\s*마다", _txt)
                 if _m:
                     bundle_unit = int(_m.group(1))
                     bundle_fee  = base_fee
@@ -1583,6 +1676,52 @@ class NaverStoreCrawler:
             raw_u = info.get("perBundleCount")
             bundle_unit = int(raw_u) if raw_u is not None else None
             bundle_fee  = int(info.get("bundleDeliveryFee", 0) or 0)
+
+        # ── 폴백: raw 전체를 재귀 탐색 ───────────────────────────────
+        # fee_type이 UNIT_QUANTITY_PAID가 아니더라도 JSON 어딘가에
+        # bundle 단위 정보나 "N개마다" 텍스트가 있을 수 있음
+        if bundle_unit is None and base_fee > 0:
+            def _scan_bundle(obj, depth: int = 0) -> Optional[int]:
+                if depth > 8:
+                    return None
+                if isinstance(obj, dict):
+                    # 키 이름 직접 탐색
+                    for k in _BUNDLE_UNIT_KEYS:
+                        v = obj.get(k)
+                        if v and str(v).isdigit() and int(v) >= 1:
+                            return int(v)
+                    # 문자열 값에서 "N개마다" / "N개 마다" 패턴 탐색
+                    for v in obj.values():
+                        if isinstance(v, str):
+                            _m2 = re.search(r"(\d+)\s*개\s*마다", v)
+                            if _m2:
+                                return int(_m2.group(1))
+                        res = _scan_bundle(v, depth + 1)
+                        if res is not None:
+                            return res
+                elif isinstance(obj, list):
+                    for item in obj:
+                        res = _scan_bundle(item, depth + 1)
+                        if res is not None:
+                            return res
+                return None
+
+            # HTML 텍스트 힌트 우선 확인 (meta-tag fallback 시 저장됨)
+            _html_hint = raw.get("_html_bundle_unit")
+            if _html_hint:
+                bundle_unit = int(_html_hint)
+                bundle_fee  = base_fee
+                if fee_type == "FREE":
+                    fee_type = "PAID"
+                print(f"[Crawler] bundle  : HTML 텍스트 힌트 — {bundle_unit}개마다 {bundle_fee:,}원")
+            else:
+                _scanned = _scan_bundle(raw)
+                if _scanned is not None:
+                    bundle_unit = _scanned
+                    bundle_fee  = base_fee
+                    if fee_type not in ("FREE",):
+                        fee_type = "UNIT_QUANTITY_PAID"
+                    print(f"[Crawler] bundle  : JSON 재귀탐색으로 발견 — {bundle_unit}개마다 {bundle_fee:,}원")
 
         return DeliveryInfo(
             base_fee=base_fee, fee_type=fee_type,

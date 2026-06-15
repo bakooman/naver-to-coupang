@@ -366,6 +366,7 @@ class QueueEntry:
     category_id:       str = ""           # 쿠팡 카테고리 ID (자동감지 or 수동입력)
     category_is_manual: bool = False     # True = 사용자가 직접 입력/선택 → 재처리 시 덮어쓰기 금지
     qty_locked:        bool = False       # True = 사용자가 수동으로 수량 지정 → L 자동계산 스킵
+    brand_locked:      bool = False       # True = 사용자가 직접 브랜드 입력 → 처리 중 덮어쓰기 금지
     min_qty:           int  = 1           # 최솟값 (기본 1개, 수정 가능)
     draft:             bool = False       # True = Wing 임시저장 (판매시작일 공란 → 상세페이지 직접 수정)
     use_nobg:          bool = False       # 항목별 누끼 설정 (파일 업로드 시점에 저장)
@@ -1961,15 +1962,19 @@ async def _process_entry(
 
         # ── 브랜드 매핑 변환 (영문→한국어, 한국어→공식명 포함) ──────────
         # brand_map.json에 한국어 브랜드도 등록 가능 (예: 파워스틱→POWERSTICK)
-        if entry.brand:
+        # brand_locked=True(사용자 직접 입력)이면 변환 생략 — 사용자 의도 보존
+        if entry.brand and not entry.brand_locked:
             _brand_before = entry.brand
             entry.brand = await _resolve_brand_korean(entry.brand, product.name)
             if entry.brand != _brand_before:
                 log_(f"[{entry.uid[:6]}] 브랜드 변환: '{_brand_before}' → '{entry.brand}'")
+        elif entry.brand and entry.brand_locked:
+            log_(f"[{entry.uid[:6]}] 브랜드 사용자 지정(🔒): '{entry.brand}' — 변환 스킵")
 
         # ── 브랜드 쿠팡 공식 DB 매칭 (직접입력 → 공식 브랜드 ID 매칭) ──────
         # resolve_brand: 쿠팡 브랜드 검색 API → Gemini 최적 매칭 → 상위노출 개선
-        if entry.brand and entry.brand not in ("해당없음", ""):
+        # brand_locked=True이면 DB 매칭도 스킵 (사용자가 지정한 브랜드 우선)
+        if entry.brand and entry.brand not in ("해당없음", "") and not entry.brand_locked:
             _gemini_key = getattr(_settings, "GEMINI_API_KEY", "")
             _gemini_model = getattr(_settings, "GEMINI_MODEL", "gemini-2.0-flash")
             try:
@@ -6472,19 +6477,20 @@ def page() -> None:
                                             _brand = brand_val
 
                                         queue.append(QueueEntry(
-                                            uid         = uuid.uuid4().hex[:8],
-                                            url         = u,
-                                            brand       = _brand,
-                                            qtys        = default_qtys,
-                                            min_qty     = default_min,
-                                            volume      = _vol,
-                                            volume_unit = _vunit,
-                                            gosisi_cat  = "기타 재화",
-                                            qty_locked  = bool(_restore_qtys and u in _restore_qtys),
-                                            use_nobg    = nobg_toggle.value == "on",
-                                            source_file = _fname or "",
-                                            lead_time   = 10 if shipping_mode.value == "overseas" else 2,
-                                            watch_store = _main_store_sel.value or "샵케이",
+                                            uid          = uuid.uuid4().hex[:8],
+                                            url          = u,
+                                            brand        = _brand,
+                                            brand_locked = bool(_brand),  # 브랜드 입력 시 처리 중 덮어쓰기 방지
+                                            qtys         = default_qtys,
+                                            min_qty      = default_min,
+                                            volume       = _vol,
+                                            volume_unit  = _vunit,
+                                            gosisi_cat   = "기타 재화",
+                                            qty_locked   = bool(_restore_qtys and u in _restore_qtys),
+                                            use_nobg     = nobg_toggle.value == "on",
+                                            source_file  = _fname or "",
+                                            lead_time    = 10 if shipping_mode.value == "overseas" else 2,
+                                            watch_store  = _main_store_sel.value or "샵케이",
                                         ))
                                         added += 1
 
@@ -7990,6 +7996,7 @@ def page() -> None:
                                                         v = (_b_inp.value or "").strip()
                                                         if v:
                                                             e_ref.brand = v
+                                                            e_ref.brand_locked = True
                                                             if e_ref.result_item:
                                                                 e_ref.result_item.brand = v
                                                                 e_ref.result_item.manufacturer = v
@@ -8086,6 +8093,7 @@ def page() -> None:
                                                 v = (_br_inp.value or "").strip()
                                                 if v:
                                                     e_ref.brand = v
+                                                    e_ref.brand_locked = True
                                                     if e_ref.result_item:
                                                         e_ref.result_item.brand = v
                                                         e_ref.result_item.manufacturer = v
@@ -8354,7 +8362,12 @@ def page() -> None:
 
                                 def _make_brand_handler(e_ref=entry, inp_ref=_brand_inp):
                                     def _h(ev=None):
-                                        e_ref.brand = inp_ref.value
+                                        v = (inp_ref.value or "").strip()
+                                        if v:
+                                            e_ref.brand = v
+                                            e_ref.brand_locked = True  # 처리 중 덮어쓰기 방지
+                                        else:
+                                            e_ref.brand_locked = False
                                     return _h
                                 _brand_inp.on("blur", _make_brand_handler())
 
@@ -8686,18 +8699,20 @@ def page() -> None:
                 default_qtys = [1, 2, 3]
             default_min = default_qtys[0] if default_qtys else 1
 
+        _brand_str = brand.strip()
         entry = QueueEntry(
-            uid         = uuid.uuid4().hex[:8],
-            url         = url,
-            brand       = brand.strip(),
-            qtys        = default_qtys,
-            min_qty     = default_min,
-            volume      = float(default_vol.value or 0),
-            volume_unit = default_vol_unit.value or "L",
-            gosisi_cat  = "기타 재화",
-            use_nobg    = nobg_toggle.value == "on",
-            lead_time   = 10 if shipping_mode.value == "overseas" else 2,
-            watch_store = _main_store_sel.value or "샵케이",
+            uid          = uuid.uuid4().hex[:8],
+            url          = url,
+            brand        = _brand_str,
+            brand_locked = bool(_brand_str),  # URL 추가 시 브랜드 입력했으면 잠금
+            qtys         = default_qtys,
+            min_qty      = default_min,
+            volume       = float(default_vol.value or 0),
+            volume_unit  = default_vol_unit.value or "L",
+            gosisi_cat   = "기타 재화",
+            use_nobg     = nobg_toggle.value == "on",
+            lead_time    = 10 if shipping_mode.value == "overseas" else 2,
+            watch_store  = _main_store_sel.value or "샵케이",
         )
         queue.append(entry)
         new_url_input.set_value("")

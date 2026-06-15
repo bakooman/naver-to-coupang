@@ -312,8 +312,9 @@ class ImageProcessor:
                  cx + d // 2, cy + d // 2],
                 fill=(0, 0, 0),
             )
-            text_color  = (255, 255, 255)
-            stroke_fill = (0, 0, 0)
+            text_color   = (255, 255, 255)
+            stroke_fill  = (255, 255, 255)  # 흰 stroke → 흰 텍스트 두껍게
+            stroke_width = 5
         else:
             # 흰색 채움 + 검정 테두리 (기존 샵케이 스타일)
             border_w = max(2, int(d * 0.026))
@@ -324,8 +325,9 @@ class ImageProcessor:
                 outline=(0, 0, 0),
                 width=border_w,
             )
-            text_color  = (0, 0, 0)
-            stroke_fill = (0, 0, 0)
+            text_color   = (0, 0, 0)
+            stroke_fill  = (0, 0, 0)
+            stroke_width = 2
 
         # ── 폰트 크기 결정 ───────────────────────────────────────
         font_size = int(d * 0.44) if qty < 10 else int(d * 0.32)
