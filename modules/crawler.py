@@ -42,12 +42,18 @@ class DeliveryInfo:
     bundle_fee:  Optional[int] = None
 
     def effective_fee(self, qty: int) -> int:
+        import math as _m
         if self.fee_type == "FREE":
             return 0
-        total = self.base_fee
-        if self.bundle_unit and self.bundle_fee and qty > self.bundle_unit:
-            total += ((qty - 1) // self.bundle_unit) * self.bundle_fee
-        return total
+        if self.bundle_unit and self.bundle_fee:
+            times = _m.ceil(qty / self.bundle_unit)
+            result = times * self.bundle_fee
+            print(
+                f"[배송비계산] 기준수량n={self.bundle_unit} / 수집수량={qty} / "
+                f"부과횟수=ceil({qty}/{self.bundle_unit})={times} / 최종배송비={result:,}원"
+            )
+            return result
+        return self.base_fee
 
 
 @dataclass
@@ -1658,12 +1664,14 @@ class NaverStoreCrawler:
             "feeGroupCount", "groupCount", "unitCount",
         )
 
+        print(f"[배송비파싱] fee_type={fee_type} base_fee={base_fee:,}원")
         if fee_type == "UNIT_QUANTITY_PAID":
             # 수량 단위마다 배송비 부과 (예: 12개마다 3,000원)
             raw_u = next((info.get(k) for k in _BUNDLE_UNIT_KEYS if info.get(k)), None)
             if raw_u is not None:
                 bundle_unit = int(raw_u)
                 bundle_fee  = base_fee
+                print(f"[배송비파싱] bundle_unit JSON키 추출 성공: n={bundle_unit}")
             # 텍스트 필드에서 "N개마다" 패턴 추출
             if bundle_unit is None:
                 _txt = str(info.get("differentialFeeByArea", "") or
@@ -1672,10 +1680,14 @@ class NaverStoreCrawler:
                 if _m:
                     bundle_unit = int(_m.group(1))
                     bundle_fee  = base_fee
+                    print(f"[배송비파싱] bundle_unit 텍스트필드 추출 성공: n={bundle_unit}")
+                else:
+                    print(f"[배송비파싱] ⚠️ bundle_unit 추출 실패 — JSON키/텍스트 모두 미발견 (Playwright DOM 추출 시도 예정)")
         elif info.get("bundleDeliveryFeeYn") == "Y" or info.get("perBundleCount"):
             raw_u = info.get("perBundleCount")
             bundle_unit = int(raw_u) if raw_u is not None else None
             bundle_fee  = int(info.get("bundleDeliveryFee", 0) or 0)
+            print(f"[배송비파싱] bundleDeliveryFeeYn 경로: n={bundle_unit} fee={bundle_fee}")
 
         # ── 폴백: raw 전체를 재귀 탐색 ───────────────────────────────
         # fee_type이 UNIT_QUANTITY_PAID가 아니더라도 JSON 어딘가에

@@ -2799,28 +2799,50 @@ class WingAutomator:
                 log(f"[Wing 판매요청] URL: {pg.url[-60:]}")
 
                 # ── 성공/실패 판정 ─────────────────────────────────────
+                # 공통: Wing 상태 배지 확인 JS
+                _JS_CHECK_STATUS = """
+                    () => {
+                        const OK = ['판매중', '심사중', '판매예정', '검토중'];
+                        for (const el of document.querySelectorAll('*')) {
+                            if (!el.offsetParent || el.children.length > 0) continue;
+                            const t = el.textContent.trim();
+                            if (OK.includes(t)) return t;
+                        }
+                        return '';
+                    }
+                """
+                log(f"[Wing 판매요청] 현재 URL: {pg.url[-80:]}")
                 if _skip_item:
                     pass  # 에러로 이미 처리됨
                 elif _registered_by_confirm:
-                    # 확인 팝업 클릭 후 3초 대기 → 페이지 상태 확인
-                    await asyncio.sleep(3)
-                    _status_after: str = await pg.evaluate("""
-                        () => {
-                            for (const el of document.querySelectorAll('*')) {
-                                if (!el.offsetParent || el.children.length > 0) continue;
-                                const t = el.textContent.trim();
-                                if (['판매중', '심사중'].includes(t)) return t;
-                            }
-                            return '';
-                        }
-                    """) or ""
-                    _url_changed = '/edit' not in pg.url
-                    published += 1
-                    if prod_name:
-                        published_names.append(prod_name)
-                    log(f"[Wing 판매요청] ✅ 등록 완료 (상태:{_status_after or '-'}, URL변경:{_url_changed}) ({inv_id})")
+                    # 확인 팝업 클릭 후 최대 6초 대기 → 실제 Wing 상태 확인
+                    _status_after = ""
+                    for _wait in range(3):  # 2초씩 최대 3회 = 6초
+                        await asyncio.sleep(2)
+                        _status_after = await pg.evaluate(_JS_CHECK_STATUS) or ""
+                        if _status_after:
+                            break
+                    _url_changed = '/edit' not in pg.url and '/modify' not in pg.url
+                    log(f"[Wing 판매요청] 상태확인: status={_status_after or '미확인'} / URL변경={_url_changed}")
+                    if _status_after:
+                        # Wing 상태가 실제로 변경됨 → 진짜 성공
+                        published += 1
+                        if prod_name:
+                            published_names.append(prod_name)
+                        log(f"[Wing 판매요청] ✅ 등록 확인됨 (상태:{_status_after}) ({inv_id})")
+                    elif _url_changed:
+                        # 상태 배지 미발견이지만 수정 페이지에서 벗어남 → 성공 가능성 높음
+                        published += 1
+                        if prod_name:
+                            published_names.append(prod_name)
+                        log(f"[Wing 판매요청] ✅ 등록 추정 (URL 전환, 상태배지 미확인) ({inv_id})")
+                    else:
+                        # 상태도 안 바뀌고 URL도 안 바뀜 → 가짜 성공 차단
+                        log(f"[Wing 판매요청] ❌ 등록 실패 — 팝업 클릭했으나 상태 미변경 ({inv_id})")
+                        errors.append(f'등록실패(상태미변경)({prod_name[:20] if prod_name else inv_id})')
+                        await self._shot(f"bulk_fail_{inv_id}")
                 else:
-                    # ── Step 3: 팝업 없이 진행 — 최종 에러 확인 ──────
+                    # ── Step 3: 팝업 없이 진행 — 에러 확인 + 상태 Cross-check ──
                     await asyncio.sleep(3)
                     _err_final: str = await pg.evaluate("""
                         () => {
@@ -2860,13 +2882,22 @@ class WingAutomator:
                     """) or ""
 
                     if not _err_final:
-                        published += 1
-                        if prod_name:
-                            published_names.append(prod_name)
-                        log(f"[Wing 판매요청] ✅ 등록 성공 ({inv_id})")
+                        # 에러 없음 + 상태 변경 Cross-check
+                        _status_nopopup = await pg.evaluate(_JS_CHECK_STATUS) or ""
+                        _url_nopopup = '/edit' not in pg.url and '/modify' not in pg.url
+                        log(f"[Wing 판매요청] 팝업없음 경로 — status={_status_nopopup or '미확인'} / URL변경={_url_nopopup}")
+                        if _status_nopopup or _url_nopopup:
+                            published += 1
+                            if prod_name:
+                                published_names.append(prod_name)
+                            log(f"[Wing 판매요청] ✅ 등록 성공 (status={_status_nopopup or 'URL전환'}) ({inv_id})")
+                        else:
+                            log(f"[Wing 판매요청] ⚠️ 등록 불확실 — 에러 없으나 상태/URL 미변경 ({inv_id})")
+                            errors.append(f'등록불확실(상태미확인)({prod_name[:20] if prod_name else inv_id})')
+                            await self._shot(f"bulk_uncertain_{inv_id}")
                     else:
                         log(f"[Wing 판매요청] ❌ 등록 실패 ({inv_id}): {_err_final[:80]}")
-                        errors.append(f'등록실패({prod_name[:20]}): {_err_final[:50]}')
+                        errors.append(f'등록실패({prod_name[:20] if prod_name else inv_id}): {_err_final[:50]}')
                         await self._shot(f"bulk_fail_{inv_id}")
             else:
                 visible_btns = [t for t in all_btn_texts if t][:8]
