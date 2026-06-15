@@ -1049,6 +1049,7 @@ class CoupangRegistrar:
     def resolve_brand(
         self,
         naver_brand: str,
+        brand_alt: str = "",
         gemini_api_key: str = "",
         gemini_model: str = "gemini-2.0-flash",
     ) -> str:
@@ -1056,78 +1057,88 @@ class CoupangRegistrar:
         네이버 브랜드명 → 쿠팡 공식 브랜드명(매칭 성공 시) 또는 원본 브랜드명(폴백).
 
         파이프라인:
-          1) 쿠팡 브랜드 검색 API로 후보 조회
-          2) 후보 1개면 바로 확정
-          3) 후보 여러 개면 Gemini로 최적 매칭
-          4) 실패/확신 없음 → 원본 브랜드명 반환 (직접입력으로 처리)
+          1) 주 브랜드명(naver_brand)으로 쿠팡 검색
+          2) 결과 없으면 대체명(brand_alt, 영문↔한글)으로 재검색
+          3) 후보 1개 → 유사도 검증
+          4) 후보 여러 개 → Gemini 최적 매칭
+          5) 실패/확신 없음 → 원본 브랜드명 반환 (직접입력)
 
+        brand_alt: Gemini가 함께 추출한 대체 언어 브랜드명
+                   (예: naver_brand="SAMYLIN", brand_alt="새밀린")
         반환: 쿠팡에 등록할 브랜드명 문자열
         """
         if not naver_brand:
             return "해당없음"
 
-        print(f"[Brand] 브랜드 매칭 시작: '{naver_brand}'")
+        brand_alt = (brand_alt or "").strip()
+        _invalid_set = {"해당없음", "없음", "unknown", ""}
+        if brand_alt.lower() in _invalid_set:
+            brand_alt = ""
 
-        candidates = self.search_brands(naver_brand)
-        if not candidates:
-            print(f"[Brand] 쿠팡 브랜드 검색 결과 없음 → 직접입력: '{naver_brand}'")
-            return naver_brand
+        print(f"[Brand] 브랜드 매칭 시작: '{naver_brand}' (alt: '{brand_alt or '-'}')")
 
-        print(f"[Brand] 후보 {len(candidates)}개: {[c['brandName'] for c in candidates[:5]]}")
+        # ── 검색 순서 결정: 주 브랜드 → 대체 브랜드 ─────────────────────────
+        search_terms = [naver_brand]
+        if brand_alt and brand_alt != naver_brand:
+            search_terms.append(brand_alt)
 
-        # ── 후보 1개: 이름 유사도 검증 후 확정 ──────────────────────────────
-        # 버그: 이전에는 단일 후보를 이름 검증 없이 무조건 확정
-        # 예) "맥심" 검색 → "THOUGHT" 1개 반환 → "THOUGHT" 자동 확정 (오매핑)
-        if len(candidates) == 1:
-            matched = candidates[0]
-            cand_name = matched["brandName"]
-            if self._brand_names_match(naver_brand, cand_name):
-                print(f"[Brand] 단일 후보 확정(이름일치): '{cand_name}' (id={matched['brandId']})")
-                return cand_name
-            # 이름 불일치 → Gemini로 2차 검증
+        for _search_kw in search_terms:
+            candidates = self.search_brands(_search_kw)
+            if not candidates:
+                print(f"[Brand] '{_search_kw}' 검색 결과 없음")
+                continue
+
+            print(f"[Brand] '{_search_kw}' 후보 {len(candidates)}개: "
+                  f"{[c['brandName'] for c in candidates[:5]]}")
+
+            # 매칭 비교 기준: 검색어 + 원본 브랜드 둘 다 허용
+            def _match(cand_name: str) -> bool:
+                return (self._brand_names_match(_search_kw, cand_name) or
+                        self._brand_names_match(naver_brand, cand_name) or
+                        (bool(brand_alt) and self._brand_names_match(brand_alt, cand_name)))
+
+            # ── 후보 1개: 유사도 검증 ──────────────────────────────────────
+            if len(candidates) == 1:
+                cand_name = candidates[0]["brandName"]
+                if _match(cand_name):
+                    print(f"[Brand] 단일 후보 확정(유사도일치): '{cand_name}' (검색어: '{_search_kw}')")
+                    return cand_name
+                # 텍스트 불일치 → Gemini 2차 검증
+                if gemini_api_key:
+                    from modules.gemini_writer import match_brand_with_gemini
+                    g_matched = match_brand_with_gemini(
+                        naver_brand=_search_kw,
+                        coupang_candidates=candidates,
+                        api_key=gemini_api_key,
+                        model=gemini_model,
+                    )
+                    if g_matched:
+                        print(f"[Brand] 단일후보 Gemini 검증 성공: '{g_matched['brandName']}'")
+                        return g_matched["brandName"]
+                print(f"[Brand] 단일후보 '{cand_name}' 유사도 불일치 — 다음 검색어 시도")
+                continue
+
+            # ── 후보 여러 개 → 텍스트 직접 매칭 먼저 ─────────────────────
+            for c in candidates:
+                if _match(c["brandName"]):
+                    print(f"[Brand] 텍스트 매칭 확정: '{c['brandName']}' (검색어: '{_search_kw}')")
+                    return c["brandName"]
+
+            # ── 텍스트 불일치 → Gemini 매칭 ──────────────────────────────
             if gemini_api_key:
                 from modules.gemini_writer import match_brand_with_gemini
-                g_matched = match_brand_with_gemini(
-                    naver_brand=naver_brand,
+                matched = match_brand_with_gemini(
+                    naver_brand=_search_kw,
                     coupang_candidates=candidates,
                     api_key=gemini_api_key,
                     model=gemini_model,
                 )
-                if g_matched:
-                    print(
-                        f"[Brand] 단일후보 Gemini 검증 성공: '{naver_brand}' → "
-                        f"'{g_matched['brandName']}' (id={g_matched['brandId']})"
-                    )
-                    return g_matched["brandName"]
-            print(
-                f"[Brand] 단일후보 '{cand_name}' 이름 불일치 → 직접입력: '{naver_brand}'"
-            )
-            return naver_brand
+                if matched:
+                    print(f"[Brand] Gemini 매칭 성공: '{matched['brandName']}' (검색어: '{_search_kw}')")
+                    return matched["brandName"]
+                print(f"[Brand] Gemini 매칭 실패(확신 없음) — 다음 검색어 시도")
 
-        # ── 후보 여러 개 → Gemini 매칭 ──────────────────────────────────────
-        if gemini_api_key:
-            from modules.gemini_writer import match_brand_with_gemini
-            matched = match_brand_with_gemini(
-                naver_brand=naver_brand,
-                coupang_candidates=candidates,
-                api_key=gemini_api_key,
-                model=gemini_model,
-            )
-            if matched:
-                print(
-                    f"[Brand] Gemini 매칭 성공: '{naver_brand}' → "
-                    f"'{matched['brandName']}' (id={matched['brandId']})"
-                )
-                return matched["brandName"]
-            print(f"[Brand] Gemini 매칭 실패(확신 없음) → 직접입력: '{naver_brand}'")
-        else:
-            # Gemini 없을 때만 텍스트 매칭으로 폴백
-            for c in candidates:
-                if self._brand_names_match(naver_brand, c["brandName"]):
-                    print(f"[Brand] 텍스트 매칭 확정: '{c['brandName']}'")
-                    return c["brandName"]
-            print("[Brand] Gemini API 키 없음 + 텍스트 매칭 실패 → 직접입력 폴백")
-
+        print(f"[Brand] 모든 검색 실패 → 직접입력: '{naver_brand}'")
         return naver_brand
 
     def diagnose_proxy(self) -> bool:

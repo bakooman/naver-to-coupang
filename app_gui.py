@@ -1913,8 +1913,10 @@ async def _process_entry(
             )
         entry.product_name = product.name
         entry.naver_price  = product.price   # 네이버 원가(1개) — 가격감시 기준가용
-        # ── 브랜드 1순위: Gemini 직접 추출 ────────────────────────────
-        # 규칙 기반보다 Gemini가 문맥을 이해하므로 먼저 시도
+        # ── 브랜드 1순위: Gemini 직접 추출 (영문명|한글명 형식) ─────────
+        # 영문명과 한글명 동시 추출 → 쿠팡 DB 양방향 검색에 활용
+        _brand_from_gemini = False  # True면 이후 _resolve_brand_korean 스킵
+        _brand_alt = ""             # 대체 검색어 (영문↔한글 상호 보완)
         if not entry.brand:
             _gk_b = getattr(_settings, "GEMINI_API_KEY", "")
             if _gk_b:
@@ -1925,30 +1927,49 @@ async def _process_entry(
                     _brand_prompt = (
                         f"상품명: {product.name}\n"
                         f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
-                        "위 상품의 브랜드명을 쿠팡 Wing 등록 기준으로 답하세요.\n"
-                        "⚠️ 핵심 규칙: 상품명에 영문 브랜드명이 있으면 반드시 영문 브랜드를 우선 사용하세요.\n"
-                        "규칙:\n"
-                        "- 브랜드명만 답하세요 (최대 30자)\n"
-                        "- 상품명 안에 영문 브랜드 표기가 있으면 영문 원본 그대로 (한글 음역 금지)\n"
-                        "- 제품 종류(샴푸/영양제/크림/오일/비타민 등)는 브랜드가 아닙니다\n"
-                        "- 수식어(휴대용/여성용/대용량/소형견/반려견 등)는 브랜드가 아닙니다\n"
-                        "- 브랜드를 알 수 없으면 '해당없음'\n"
+                        "위 상품의 브랜드명을 쿠팡 Wing 등록 기준으로 추출하세요.\n"
+                        "⚠️ 반드시 '영문공식명|한글공식명' 형식으로만 답하세요 (파이프 | 구분, 1줄).\n"
+                        "  - 상품명에 영문 브랜드가 있으면 영문을 왼쪽에, 한글명을 오른쪽에\n"
+                        "  - 영문명이 없으면 '|한글명', 한글명이 없으면 '영문명|'\n"
+                        "  - 제품 종류(샴푸/영양제/크림/비타민 등), 수식어(대용량/소형견 등)는 브랜드 아님\n"
+                        "  - 브랜드 불명확 시 '|해당없음'\n\n"
                         "예시:\n"
-                        "  '사이노퀸 시노퀸 소형견 강아지 관절영양제 90 캡슐 Synoquin EFA' → SYNOQUIN\n"
-                        "  '새밀린 간기능 영양제 소형견 Samylin' → SAMYLIN\n"
-                        "  '고바야시제약 브레스케어 민트향 50정' → 고바야시제약\n"
-                        "  'Dove 비타민C 비누 3개입' → Dove\n"
-                        "  '파워스틱 남성용 데오드란트 스틱 PowerStick' → POWERSTICK\n"
-                        "  '너드 말랑말랑 과일향 젤리 레인보우 구미 클러스터' → 너즈\n"
-                        "  '하리보 골드베렌 젤리 200g' → 하리보"
+                        "  '사이노퀸 소형견 강아지 관절영양제 Synoquin EFA' → SYNOQUIN|사이노퀸\n"
+                        "  '새밀린 간기능 영양제 소형견 반려묘 Samylin' → SAMYLIN|새밀린\n"
+                        "  '고바야시제약 브레스케어 민트향 50정' → KOBAYASHI|고바야시제약\n"
+                        "  'Dove 비타민C 비누 3개입' → Dove|\n"
+                        "  '파워스틱 남성용 데오드란트 PowerStick' → POWERSTICK|\n"
+                        "  '너드 말랑말랑 과일향 젤리 레인보우 구미 클러스터' → |너즈\n"
+                        "  '하리보 골드베렌 젤리 200g' → HARIBO|하리보\n"
+                        "  '맥심 모카골드 커피믹스 50T' → |맥심\n"
+                        "  '카누 미니 아메리카노 10T' → KANU|카누"
                     )
                     _gresp_b = await loop.run_in_executor(
                         None, lambda: genai.GenerativeModel(_gm_b).generate_content(_brand_prompt)
                     )
-                    _brand_txt = (_gresp_b.text or "").strip().split("\n")[0].strip()
-                    if _brand_txt and _brand_txt.lower() not in ("unknown", "해당없음", "없음", ""):
-                        log_(f"[{entry.uid[:6]}] ✅ 브랜드 Gemini(1순위) 추출: '{_brand_txt}'")
-                        entry.brand = _brand_txt
+                    _brand_raw = (_gresp_b.text or "").strip().split("\n")[0].strip()
+                    # 파이프 구분 파싱
+                    if "|" in _brand_raw:
+                        _bp = _brand_raw.split("|", 1)
+                        _brand_en = _bp[0].strip()
+                        _brand_kr = _bp[1].strip()
+                    else:
+                        # 파이프 없는 응답 → 단일 값 처리 (구버전 호환)
+                        _brand_en = _brand_raw if _is_english_brand(_brand_raw) else ""
+                        _brand_kr = _brand_raw if not _is_english_brand(_brand_raw) else ""
+                    # 영문명 우선, 없으면 한글명
+                    _invalid = {"해당없음", "없음", "unknown", ""}
+                    _brand_en_ok = _brand_en.lower() not in _invalid
+                    _brand_kr_ok = _brand_kr.lower() not in _invalid
+                    _brand_primary   = _brand_en if _brand_en_ok else (_brand_kr if _brand_kr_ok else "")
+                    _brand_secondary = _brand_kr if _brand_en_ok and _brand_kr_ok else (
+                                       _brand_en if not _brand_en_ok and _brand_kr_ok else "")
+                    if _brand_primary:
+                        log_(f"[{entry.uid[:6]}] ✅ 브랜드 Gemini(1순위): "
+                             f"'{_brand_primary}' (alt: '{_brand_secondary}')")
+                        entry.brand  = _brand_primary
+                        _brand_alt   = _brand_secondary
+                        _brand_from_gemini = True
                     else:
                         log_(f"[{entry.uid[:6]}] ⚠ 브랜드 Gemini 미인식 — 규칙 기반 폴백")
                 except Exception as _be:
@@ -1962,10 +1983,10 @@ async def _process_entry(
 
         log_(f"[{entry.uid[:6]}] 크롤 완료: {product.name} (브랜드: {entry.brand})")
 
-        # ── 브랜드 매핑 변환 (영문→한국어, 한국어→공식명 포함) ──────────
-        # brand_map.json에 한국어 브랜드도 등록 가능 (예: 파워스틱→POWERSTICK)
-        # brand_locked=True(사용자 직접 입력)이면 변환 생략 — 사용자 의도 보존
-        if entry.brand and not entry.brand_locked:
+        # ── 브랜드 매핑 변환 (영문→한국어, 한국어→공식명) ───────────────
+        # Gemini가 이미 최적 브랜드명을 추출했으면 스킵 (영문→한글 역변환 방지)
+        # 규칙 기반(2순위) 추출 시에만 실행 + brand_map.json 히트 시에만 변환
+        if entry.brand and not entry.brand_locked and not _brand_from_gemini:
             _brand_before = entry.brand
             entry.brand = await _resolve_brand_korean(entry.brand, product.name)
             if entry.brand != _brand_before:
@@ -1973,9 +1994,9 @@ async def _process_entry(
         elif entry.brand and entry.brand_locked:
             log_(f"[{entry.uid[:6]}] 브랜드 사용자 지정(🔒): '{entry.brand}' — 변환 스킵")
 
-        # ── 브랜드 쿠팡 공식 DB 매칭 (직접입력 → 공식 브랜드 ID 매칭) ──────
-        # resolve_brand: 쿠팡 브랜드 검색 API → Gemini 최적 매칭 → 상위노출 개선
-        # brand_locked=True이면 DB 매칭도 스킵 (사용자가 지정한 브랜드 우선)
+        # ── 브랜드 쿠팡 공식 DB 매칭 ────────────────────────────────────
+        # 영문/한글 양방향 검색 → 유사도 검증 → 공식 브랜드 확정
+        # brand_locked=True이면 DB 매칭 스킵
         if entry.brand and entry.brand not in ("해당없음", "") and not entry.brand_locked:
             _gemini_key = getattr(_settings, "GEMINI_API_KEY", "")
             _gemini_model = getattr(_settings, "GEMINI_MODEL", "gemini-2.0-flash")
@@ -1983,8 +2004,9 @@ async def _process_entry(
                 _registrar = _get_registrar()
                 _brand_matched = await asyncio.get_running_loop().run_in_executor(
                     None,
-                    lambda: _registrar.resolve_brand(
-                        entry.brand,
+                    lambda b=entry.brand, ba=_brand_alt: _registrar.resolve_brand(
+                        b,
+                        brand_alt=ba,
                         gemini_api_key=_gemini_key,
                         gemini_model=_gemini_model,
                     ),
