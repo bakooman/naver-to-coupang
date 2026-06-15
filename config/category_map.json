@@ -883,6 +883,42 @@
       "gosisi_cat": "가공식품",
       "priority": 16
     },
+    "── 반려동물 > 펫 기본 감지 (강아지/고양이 단어 하나만 있어도 펫 카테고리 보장) ──": {},
+    "강아지": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "소형견": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "대형견": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "반려견": {
+      "category_id": "65890",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "고양이": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "반려묘": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 30
+    },
+    "캣": {
+      "category_id": "66135",
+      "gosisi_cat": "기타 재화",
+      "priority": 28
+    },
     "── 반려동물 > 강아지/고양이 겸용 영양제 ────────────────────────────": {},
     "강아지 고양이 관절영양제": {
       "category_id": "104395",
