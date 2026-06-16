@@ -330,7 +330,7 @@ class ImageProcessor:
             stroke_width = 2
 
         # ── 폰트 크기 결정 ───────────────────────────────────────
-        font_size = int(d * 0.44) if qty < 10 else int(d * 0.32)
+        font_size = int(d * 0.34) if qty < 10 else int(d * 0.25)
         font = self._load_font(font_size)
 
         # ── 텍스트 원 중앙 정렬 ──────────────────────────────────

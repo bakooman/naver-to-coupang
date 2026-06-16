@@ -361,9 +361,12 @@ class CategoryDetector:
 
             # 2. 토큰 단위 포함 — 단어 경계에서만 허용
             # ❌ "크림" in "아이스크림스푼" 처럼 복합어 내부 substring 오매칭 방지
-            # ✅ 토큰으로 쪼갰을 때 keyword 토큰이 name 토큰 집합에 완전히 포함될 때만 0.8
+            # ✅ 토큰으로 쪼갰을 때 keyword 토큰이 name 토큰 집합에 완전히 포함될 때만
+            # ※ 비율이 낮으면 점수 감소 — 예) '젤리' 1개가 4토큰 카테고리에 포함될 때
+            #    0.8 * (1/4) = 0.2 → 임계값 0.5 미달 → '크림/젤리/쿠션 아이섀도' 오매핑 방지
             elif kw_tokens and kw_tokens.issubset(name_tokens):
-                score = 0.8
+                _ratio = len(kw_tokens) / max(len(name_tokens), 1)
+                score = 0.8 * _ratio if _ratio < 0.5 else 0.8
             # name 전체가 keyword 안에 포함(name이 더 짧은 경우) — 완전 토큰 일치
             elif name_tokens and name_tokens.issubset(kw_tokens):
                 score = 0.75

@@ -1436,6 +1436,7 @@ async def _gemini_fill_required_options(
         "향":         "향 이름. 예: 라벤더, 복숭아, 민트, 오리지널",
         "사이즈":     "크기 표기. 예: S, M, L, XL 또는 100ml, 200ml",
         "종류":       "종류/타입명. 예: 오리지널, 스탠다드, 프리미엄",
+        "급여포인트": "반려동물 크기/종류별 급여 적합성. 예: 소형견 적합, 중형견 적합, 대형견 적합, 전견종 적합, 소형견~대형견 적합, 고양이 적합",
     }
     unit_guide_lines = []
     for opt in _missing:
@@ -1492,7 +1493,10 @@ async def _gemini_fill_required_options(
                 contents=prompt,
             )
         )
-        raw_text = (resp.text or "").strip()
+        try:
+            raw_text = (resp.text or "").strip()
+        except Exception:
+            raw_text = ""
         _log(f"[{uid[:6]}] 🤖 Gemini 필수옵션 원본응답: {raw_text[:200]}")
 
         # JSON 파싱
@@ -1523,11 +1527,10 @@ async def _gemini_fill_required_options(
             opt_type = opt_type.strip()
             opt_val  = str(opt_val).strip()
 
-            # 허용 옵션 목록 검증 (필수 목록에 있는 것은 통과 허용)
+            # 허용 옵션 목록 검증 — valid_options 외 옵션은 무조건 거부
             if valid_options and opt_type not in valid_options:
-                if required_options and opt_type not in required_options:
-                    _log(f"[{uid[:6]}] ⚠ Gemini 옵션 무시 (카테고리 불허): {opt_type}={opt_val}")
-                    continue
+                _log(f"[{uid[:6]}] ⚠ Gemini 옵션 무시 (카테고리 불허): {opt_type}={opt_val}")
+                continue
 
             # 필수 목록에 없는 옵션 무시 (할루시네이션 방지)
             if required_options and opt_type not in required_options:
@@ -3036,10 +3039,9 @@ async def _process_entry(
                 # 고체류 카테고리 — 중량 유지, 용량 제거
                 extra_options = [(t, v) for t, v in extra_options if t != "개당 용량"]
                 log_(f"[{entry.uid[:6]}] 개당 용량 배타 제거 (카테고리 필수: 중량 {_wt_val} 유지)")
-            elif _need_vol and _need_wt and _is_liquid:
-                # 둘 다 required지만 액체 식품(≥50ml) — 용량 우선, 중량 제거
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 중량"]
-                log_(f"[{entry.uid[:6]}] 개당 중량 배타 제거 (액체 식품 {_vol_val} ≥ 50ml, 용량 우선)")
+            elif _need_vol and _need_wt:
+                # 둘 다 required → 둘 다 유지 (배타 처리 없음)
+                log_(f"[{entry.uid[:6]}] 배타 처리 스킵 (개당 중량·개당 용량 둘 다 필수 → 둘 다 유지)")
             elif not _need_vol and not _need_wt:
                 # required 미지정 — 용량 우선 유지 (기본값)
                 extra_options = [(t, v) for t, v in extra_options if t != "개당 중량"]
@@ -3058,7 +3060,10 @@ async def _process_entry(
         # ⚠️ 단, 번들이 여러 개인데 상품명에서 실제 색상 단어를 찾지 못한 경우:
         #    모든 번들에 동일한 색상값("기본"/브랜드명 등)이 들어가면
         #    Wing이 "중복된 옵션값" 오류를 냄 → 색상 옵션을 아예 삽입하지 않음.
-        if '색상' in (_guide_valid or []) and '색상' not in _existing_types:
+        # 가공식품 카테고리는 색상이 절대 허용되지 않으므로 추가 자체를 막음.
+        _color_gosisi = entry.gosisi_cat or _guide_gosisi_cat(entry.category_id or "")
+        _is_food_cat = "가공식품" in _color_gosisi or "건강기능식품" in _color_gosisi
+        if '색상' in (_guide_valid or []) and '색상' not in _existing_types and not _is_food_cat:
             _color_kw = _re.search(
                 r'(화이트|블랙|블루|레드|그린|옐로|실버|골드|베이지|그레이|투명|클리어'
                 r'|White|Black|Blue|Red|Green|Yellow|Silver|Gold|Grey|Gray|Clear)',
@@ -3089,7 +3094,9 @@ async def _process_entry(
             and entry.category_id
             and _guide_valid
         ):
-            _req_opts_for_gemini = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", [])
+            _req_opts_raw = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", [])
+            # guide_valid 기준으로 필터 — valid 하지 않은 옵션을 Gemini가 재추가하는 것 방지
+            _req_opts_for_gemini = [r for r in _req_opts_raw if not _guide_valid or r in _guide_valid]
             _gemini_key_opt  = getattr(_settings, "GEMINI_API_KEY", "")
             _gemini_model_opt = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
 
@@ -3116,6 +3123,13 @@ async def _process_entry(
                 uid              = entry.uid,
             )
 
+        # ── 급여포인트 폴백 — Gemini 실패 시 기본값 삽입 ──────────────────
+        if entry.category_id:
+            _gp_req = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", [])
+            if "급여포인트" in _gp_req and not any(t == "급여포인트" for t, _ in extra_options):
+                extra_options.append(("급여포인트", "소형견~대형견 적합"))
+                log_(f"[{entry.uid[:6]}] 급여포인트 기본값 삽입 (Gemini 미응답 폴백)")
+
         # ── Gemini 후 중량/용량 배타 최종 정리 ────────────────────────────
         # Gemini가 기존 dedup 이후 중량·용량을 재추가하는 경우를 잡기 위한 2차 필터
         _WT_TYPES = {"개당 중량", "중량", "무게", "순중량", "최소 중량"}
@@ -3140,6 +3154,9 @@ async def _process_entry(
             elif _need_wt_f and not _need_vol_f:
                 extra_options = [(t, v) for t, v in extra_options if t not in _VL_TYPES]
                 log_(f"[{entry.uid[:6]}] [후처리] 용량 제거 (카테고리 중량 우선: {_final_wt})")
+            elif _need_vol_f and _need_wt_f:
+                # 둘 다 required → 둘 다 유지 (배타 처리 없음)
+                log_(f"[{entry.uid[:6]}] [후처리] 배타 처리 스킵 (개당 중량·개당 용량 둘 다 필수 → 둘 다 유지)")
             elif _is_liq_f:
                 # 명확한 액체(≥50ml) → 용량 유지, 중량 제거
                 extra_options = [(t, v) for t, v in extra_options if t not in _WT_TYPES]
@@ -3242,7 +3259,11 @@ async def _process_entry(
                                 _fbu = _fbm.group(2).lower()
                                 _fb_cur_wt_g = _fbn * 1000.0 if _fbu == 'kg' else _fbn
                             break
-                    for _line in (_gresp_ov.text or "").strip().splitlines():
+                    try:
+                        _ov_raw = _gresp_ov.text
+                    except Exception:
+                        _ov_raw = ""
+                    for _line in (_ov_raw or "").strip().splitlines():
                         if "=" in _line:
                             _ot, _, _ov = _line.partition("=")
                             _ot = _ot.strip(); _ov = _ov.strip()
@@ -3443,6 +3464,14 @@ async def _process_entry(
                     log_(f"[{entry.uid[:6]}] ⚠ Gemini 전수 보완 실패: {_fe}")
             else:
                 log_(f"[{entry.uid[:6]}] ⚠ GEMINI_API_KEY 미설정 — critical 오류 수동 수정 필요")
+
+        # ── 중복 옵션 유형 제거 (마지막 값 유지 — Gemini 교정값이 더 정확) ──
+        _dedup_seen: dict[str, str] = {}
+        for _dt, _dv in extra_options:
+            _dedup_seen[_dt] = _dv
+        if len(_dedup_seen) < len(extra_options):
+            log_(f"[{entry.uid[:6]}] 중복 옵션 유형 제거: {len(extra_options) - len(_dedup_seen)}개")
+        extra_options = list(_dedup_seen.items())
 
         # ── 최종 안전망: category_options.json 기준으로 불허 옵션 재필터링 ──
         # Gemini 보완 등으로 불허 옵션이 끼어들어도 이 단계에서 제거
@@ -3841,7 +3870,19 @@ async def _run_global_processing(margin_rate: float, lead_time: int, use_nobg: b
                     _e.category_id = _nid
                     _e.result_item.category_id = _nid
                     _e.gosisi_cat = _ngo
+                    _e.result_item.gosisi_cat = _ngo
                     _e.detected_keyword = _nkw
+                    # 새 카테고리 기준으로 불허 옵션 제거
+                    _nfv = _valid_option_types(_nid)
+                    if _nfv:
+                        _opt_before = len(_e.result_item.extra_options)
+                        _e.result_item.extra_options = [
+                            (t, v) for t, v in _e.result_item.extra_options if t in _nfv
+                        ]
+                        _removed_n = _opt_before - len(_e.result_item.extra_options)
+                        if _removed_n:
+                            print(f"[카테고리 갱신] 불허 옵션 {_removed_n}개 제거 "
+                                  f"({_e.product_name[:20]}: 허용 {_nfv})")
         except Exception as _ce:
             print(f"[카테고리 갱신] 오류 (무시): {_ce}")
 
