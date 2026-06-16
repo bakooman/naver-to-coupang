@@ -7988,14 +7988,36 @@ def page() -> None:
                                             ).props("dense outlined").style("width:180px")
                                             def _h(ev=None):
                                                 v = (_br_inp.value or "").strip()
-                                                if v:
-                                                    e_ref.brand = v
-                                                    e_ref.brand_locked = True
-                                                    if e_ref.result_item:
-                                                        e_ref.result_item.brand = v
-                                                        e_ref.result_item.manufacturer = v
+                                                if not v:
+                                                    return
+                                                old_brand = (e_ref.brand or "").strip()
+                                                e_ref.brand = v
+                                                e_ref.brand_locked = True
+                                                if e_ref.result_item:
+                                                    e_ref.result_item.brand = v
+                                                    e_ref.result_item.manufacturer = v
+                                                # 같은 브랜드 항목 전체에 전파 (미잠금 항목만)
+                                                _prop_count = 0
+                                                if old_brand and old_brand.upper() != v.upper():
+                                                    for _pe in queue:
+                                                        if _pe.uid == e_ref.uid or _pe.brand_locked:
+                                                            continue
+                                                        if (_pe.brand or "").strip().upper() == old_brand.upper():
+                                                            _pe.brand = v
+                                                            _pe.brand_locked = True
+                                                            if _pe.result_item:
+                                                                _pe.result_item.brand = v
+                                                                _pe.result_item.manufacturer = v
+                                                            _prop_count += 1
+                                                    # brand_map.json 저장 → 이후 신규수집도 자동 적용
+                                                    _bmap = _load_brand_map()
+                                                    _bmap[old_brand] = v
+                                                    _save_brand_map(_bmap)
+                                                if _prop_count:
+                                                    ui.notify(f"브랜드 저장: {v}  (큐 {_prop_count}개 전파)", type="positive", timeout=2500)
+                                                else:
                                                     ui.notify(f"브랜드 저장: {v}", type="positive", timeout=1500)
-                                                    _render_queue()
+                                                _render_queue()
                                             _br_inp.on("blur", _h)
                                             _br_inp.on("change", _h)
                                         _make_brand_edit()
@@ -8042,8 +8064,24 @@ def page() -> None:
                                                 e_ref.category_is_manual = bool(v)
                                                 if e_ref.result_item:
                                                     e_ref.result_item.category_id = v
+                                                # 같은 브랜드 항목에 카테고리 전파 (미잠금 항목만)
+                                                _prop_count = 0
+                                                _cur_brand = (e_ref.brand or "").strip()
+                                                if v and _cur_brand:
+                                                    for _pe in queue:
+                                                        if _pe.uid == e_ref.uid or _pe.category_is_manual:
+                                                            continue
+                                                        if (_pe.brand or "").strip() == _cur_brand:
+                                                            _pe.category_id = v
+                                                            _pe.category_is_manual = True
+                                                            if _pe.result_item:
+                                                                _pe.result_item.category_id = v
+                                                            _prop_count += 1
                                                 if v:
-                                                    ui.notify(f"카테고리 ID 저장: {v}", type="positive", timeout=1500)
+                                                    if _prop_count:
+                                                        ui.notify(f"카테고리 ID 저장: {v}  (큐 {_prop_count}개 전파)", type="positive", timeout=2500)
+                                                    else:
+                                                        ui.notify(f"카테고리 ID 저장: {v}", type="positive", timeout=1500)
                                                 _render_queue()
                                                 if v:
                                                     try:
@@ -8261,8 +8299,23 @@ def page() -> None:
                                     def _h(ev=None):
                                         v = (inp_ref.value or "").strip()
                                         if v:
+                                            old_brand = (e_ref.brand or "").strip()
                                             e_ref.brand = v
-                                            e_ref.brand_locked = True  # 처리 중 덮어쓰기 방지
+                                            e_ref.brand_locked = True
+                                            # 같은 브랜드 항목 전체에 전파 (미잠금 항목만)
+                                            if old_brand and old_brand.upper() != v.upper():
+                                                for _pe in queue:
+                                                    if _pe.uid == e_ref.uid or _pe.brand_locked:
+                                                        continue
+                                                    if (_pe.brand or "").strip().upper() == old_brand.upper():
+                                                        _pe.brand = v
+                                                        _pe.brand_locked = True
+                                                        if _pe.result_item:
+                                                            _pe.result_item.brand = v
+                                                            _pe.result_item.manufacturer = v
+                                                _bmap = _load_brand_map()
+                                                _bmap[old_brand] = v
+                                                _save_brand_map(_bmap)
                                         else:
                                             e_ref.brand_locked = False
                                     return _h
