@@ -8953,6 +8953,28 @@ def page() -> None:
             ui.notify("Wing 계정 정보 누락 — .env 확인", type="negative", timeout=5000)
             return
 
+        # ── 세션 파일 사전 확인 ─────────────────────────────────────────
+        # 세션 파일 없으면 서버에서 xauth 재로그인 불가 → 3분 타임아웃 전에 미리 차단
+        _data_dir = Path(__file__).parent / "data"
+        _missing_sessions: list[str] = []
+        for _st in _stores_in_queue:
+            _su, _ = _STORE_CREDS[_st]
+            if not _su:
+                continue
+            _slug = _re.sub(r'[^a-zA-Z0-9]', '_', _su)[:32]
+            _sess_file = _data_dir / f"wing_session_{_slug}.json"
+            if not _sess_file.exists():
+                _missing_sessions.append(_st)
+        if _missing_sessions:
+            _st_list = ", ".join(_missing_sessions)
+            ui.notify(
+                f"Wing 세션 파일 없음 ({_st_list})\n"
+                f"로컬 PC에서 refresh_wing_session.py 실행 후 서버에 업로드하세요",
+                type="negative", timeout=10000,
+            )
+            wing_pub_status.set_text(f"⚠️ 세션 파일 없음 ({_st_list}) — refresh_wing_session.py 실행 필요")
+            return
+
         # draft=True 상품 목록
         draft_names: list[str] = [
             e.result_item.product_name

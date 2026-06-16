@@ -97,6 +97,7 @@ class WingAutomator:
         self.username = username
         self.password = password
         self.headless = headless
+        self._last_login_error: str = ""
         self._pw:  Optional[Playwright]     = None
         self._br:  Optional[Browser]        = None
         self._ctx: Optional[BrowserContext] = None
@@ -194,9 +195,14 @@ class WingAutomator:
         cur = pg.url
         if self._is_auth_url(cur) or "login" in cur.lower():
             log(f"[Wing] 로그인 필요 (URL: {cur[:80]})")
-            if self._session_path.exists():
-                self._session_path.unlink()
-                log("[Wing] 스테일 세션 파일 삭제")
+            # xauth 리다이렉트 = 서버에서 xauth.coupang.com 접근 불가 → 즉시 실패 반환
+            # 세션 파일은 삭제하지 않음 — refresh_wing_session.py 갱신 후 SCP 업로드로 복구 가능
+            if self._is_auth_url(cur):
+                self._last_login_error = (
+                    "Wing 세션 만료 — 로컬 PC에서 refresh_wing_session.py 실행 후 서버에 업로드하세요"
+                )
+                log(f"[Wing] ❌ {self._last_login_error}")
+                return False
             return await self._do_login()
 
         if await pg.locator(".wing-gnb, .gnb-menu, nav, [class*=sidebar]").count() > 0:
@@ -1542,7 +1548,7 @@ class WingAutomator:
         all_errors: list[str] = []
 
         if not await self._ensure_login():
-            return WingEditResult(success=False, message="Wing 로그인 실패")
+            return WingEditResult(success=False, message=self._last_login_error or "Wing 로그인 실패")
 
         if not await self._goto_edit(params.seller_product_id):
             return WingEditResult(
@@ -1668,7 +1674,7 @@ class WingAutomator:
         BULK_BTN_KW = ["판매요청", "판매 요청", "승인요청", "판매신청", "판매 신청"]
 
         if not await self._ensure_login():
-            return {"published": 0, "skipped": 0, "errors": ["Wing 로그인 실패"]}
+            return {"published": 0, "skipped": 0, "errors": [self._last_login_error or "Wing 로그인 실패"]}
 
         # ── 1단계: 상품 조회/수정 메뉴 클릭으로 목록 진입 ───────────
         log("[Wing 판매요청] 상품 목록 페이지 이동 중...")
@@ -1926,11 +1932,14 @@ class WingAutomator:
             if progress_cb:
                 try: progress_cb(idx, total)
                 except Exception: pass
-            edit_url = f"{WING_URL}/vendor-inventory/modify?vendorInventoryId={inv_id}"
+            edit_url = (
+                f"{WING_URL}/tenants/seller-web/vendor-inventory/modify"
+                f"?vendorInventoryId={inv_id}&locale=ko_KR"
+            )
             log(f"[Wing 판매요청] [{idx}/{total}] 상품 {inv_id} 수정 페이지 이동 중...")
 
             try:
-                await pg.goto(edit_url, wait_until="domcontentloaded", timeout=30_000)
+                await pg.goto(edit_url, wait_until="load", timeout=40_000)
             except Exception as e:
                 log(f"[Wing 판매요청] ⚠️ 페이지 이동 실패 ({inv_id}): {e}")
                 errors.append(f"페이지 이동 실패: {inv_id}")
