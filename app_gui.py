@@ -1419,6 +1419,11 @@ async def _gemini_fill_required_options(
     # ── 옵션별 단위 가이드 ───────────────────────────────────────────
     _UNIT_GUIDE = {
         "개당 중량":  "숫자+단위. 단위는 g 또는 kg만 허용. 예: 112g, 500g, 1kg, 1.5kg",
+        "개당 캡슐/정": (
+            "정수+단위. 예: 30정, 60캡슐, 90개입\n"
+            "    ⚠ 액상 제품(시럽·오일·음료·액체 등)에는 이 항목을 JSON에서 완전히 제외하세요.\n"
+            "    ⚠ '0개입','0정' 등 0으로 시작하는 값은 절대 입력 금지."
+        ),
         "개당 용량":  (
             "숫자+단위. 단위는 ml 또는 L만 허용. 예: 295ml, 500ml, 1L, 1.5L\n"
             "    ⚠ 고체 제품(과자·사탕·젤리·건어물·정제·분말·스틱형데오드란트·고체비누 등)은 개당 용량 항목을 JSON에서 제외하세요.\n"
@@ -1470,6 +1475,8 @@ async def _gemini_fill_required_options(
 5. '개당 용량'은 액상·겔·크림·세럼·샴푸·음료 등 실제 부피가 있는 액체 제품에만 기입하세요.
    고체 식품(과자·사탕·젤리·건어물·정제·분말 등)이나 고체 상품(스틱형 데오드란트·고체 비누·왁스·립밤 등)은 '개당 용량'을 JSON에서 완전히 제외하세요.
    실제 용량 수치를 확인할 수 없을 때 '1ml', '2ml' 같은 임의 소용량을 절대 기입하지 마세요.
+6. '개당 캡슐/정'은 정제·캡슐·과립·분말 등 고체 형태 제품에만 기입하세요.
+   액상 제품(시럽·오일·음료·드링크·액체)은 '개당 캡슐/정'을 JSON에서 완전히 제외하세요.
 
 [출력 예시]
 {{"개당 중량": "112g", "개당 용량": "295ml"}}"""
@@ -2948,11 +2955,18 @@ async def _process_entry(
             _gosisi_hf in ("가공식품", "건강기능식품")
             or any(kw in _food_cat_label_hf for kw in _FOOD_KWS_HF)
         )
-        if _is_food_hf and _guide_valid:
-            _ff_removed = [o for o in _guide_valid if o in _FORBIDDEN_FOOD_OPTS]
-            if _ff_removed:
-                _guide_valid = [o for o in _guide_valid if o not in _FORBIDDEN_FOOD_OPTS]
-                log_(f"[{entry.uid[:6]}] 🚫 식품 카테고리 금지 옵션 제거: {_ff_removed}")
+        if _is_food_hf:
+            # _guide_valid에서 제거 (Gemini 응답에 색상/사이즈가 포함된 경우)
+            if _guide_valid:
+                _ff_guide = [o for o in _guide_valid if o in _FORBIDDEN_FOOD_OPTS]
+                if _ff_guide:
+                    _guide_valid = [o for o in _guide_valid if o not in _FORBIDDEN_FOOD_OPTS]
+                    log_(f"[{entry.uid[:6]}] 🚫 식품 카테고리 금지 옵션 제거: {_ff_guide}")
+            # extra_options에서도 직접 제거 (_guide_valid 미적용 경로 포함)
+            _ff_direct = [(t, v) for t, v in extra_options if t in _FORBIDDEN_FOOD_OPTS]
+            if _ff_direct:
+                extra_options = [(t, v) for t, v in extra_options if t not in _FORBIDDEN_FOOD_OPTS]
+                log_(f"[{entry.uid[:6]}] 🚫 식품 카테고리 extra_options 금지 옵션 직접 제거: {[t for t,_ in _ff_direct]}")
 
         if _guide_valid:
             _before = len(extra_options)
