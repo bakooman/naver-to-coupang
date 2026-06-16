@@ -1535,6 +1535,11 @@ async def _gemini_fill_required_options(
                 _log(f"[{uid[:6]}] ⚠ Gemini 옵션 무시 (빈값/모름): {opt_type}={opt_val}")
                 continue
 
+            # 개당 캡슐/정에 "0개입","0정" 등 — 액상 제품 할루시네이션 차단
+            if opt_type == "개당 캡슐/정" and _re.match(r'^0[개정캡]', opt_val):
+                _log(f"[{uid[:6]}] ⚠ Gemini 옵션 무시 (개당 캡슐/정 0값 — 액상 제품): {opt_val}")
+                continue
+
             # ── 단위 정합성 검증: 중량/용량 옵션에 혼합 단위 값 방지 ──────
             # 예) "개당 중량"에 "20g 20ml" → "20g"만 추출, 나머지 버림
             _WT_CLEAN_RE = _re.compile(r'(\d+(?:\.\d+)?)\s*(g|kg)', _re.I)
@@ -2906,7 +2911,8 @@ async def _process_entry(
                         f"쿠팡 카테고리: {_cur_cat_label_opt} (ID: {entry.category_id})\n\n"
                         "이 쿠팡 카테고리에서 구매옵션으로 허용되는 옵션 유형을 아는 것만 답하세요.\n"
                         "형식: 옵션유형1,옵션유형2 (쉼표 구분, 최대 3개)\n"
-                        "예시 가능한 옵션유형: 수량,향/맛,용량,색상,사이즈,개당 용량,개당 중량,종류\n"
+                        "예시 가능한 옵션유형: 수량,향/맛,용량,개당 용량,개당 중량,종류\n"
+                        "⚠ 식품/가공식품/건강기능식품/영양제/사탕/젤리/과자/구미/음료/간식 카테고리는 '색상','사이즈' 절대 금지.\n"
                         "반드시 '수량'은 포함하세요. 확실하지 않으면 '수량'만 답하세요.\n"
                         "옵션유형 목록만 답하세요. 설명 금지."
                     )
@@ -2927,6 +2933,26 @@ async def _process_entry(
                         log_(f"[{entry.uid[:6]}] ⚠ Gemini 유효옵션 응답 없음 — 필터링 생략")
                 except Exception as _oe:
                     log_(f"[{entry.uid[:6]}] ⚠ Gemini 유효옵션 조회 실패: {_oe}")
+
+        # ── 식품/가공식품 카테고리 '색상','사이즈' 하드 필터 ─────────────────────
+        _FORBIDDEN_FOOD_OPTS = {"색상", "사이즈"}
+        _food_cat_label_hf = ""
+        if entry.category_id:
+            for _wc_hf in _get_wing_cat_flat():
+                if str(_wc_hf.get("code", "")) == entry.category_id:
+                    _food_cat_label_hf = _wc_hf.get("label") or _wc_hf.get("name", "")
+                    break
+        _FOOD_KWS_HF = {"식품", "사탕", "젤리", "구미", "과자", "영양", "건강기능", "음료", "간식", "비타민", "프로틴"}
+        _gosisi_hf = _guide_gosisi_cat(entry.category_id) if entry.category_id else ""
+        _is_food_hf = (
+            _gosisi_hf in ("가공식품", "건강기능식품")
+            or any(kw in _food_cat_label_hf for kw in _FOOD_KWS_HF)
+        )
+        if _is_food_hf and _guide_valid:
+            _ff_removed = [o for o in _guide_valid if o in _FORBIDDEN_FOOD_OPTS]
+            if _ff_removed:
+                _guide_valid = [o for o in _guide_valid if o not in _FORBIDDEN_FOOD_OPTS]
+                log_(f"[{entry.uid[:6]}] 🚫 식품 카테고리 금지 옵션 제거: {_ff_removed}")
 
         if _guide_valid:
             _before = len(extra_options)
