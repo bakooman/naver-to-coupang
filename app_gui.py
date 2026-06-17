@@ -4140,6 +4140,14 @@ html, body {
 }
 .topbar .q-btn.nav-btn.active .q-btn__content { color: #fff !important; }
 .nav-spacer { flex:1; }
+.nav-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255,255,255,0.15);
+  margin: 0 6px;
+  align-self: center;
+  flex-shrink: 0;
+}
 .topbar .q-btn.topbar-restart,
 .topbar .q-btn.topbar-restart:before {
   padding: 7px 16px !important;
@@ -4176,7 +4184,7 @@ html, body {
 }
 .topbar .q-btn.topbar-restart .q-btn__content { color: #fca5a5 !important; }
 .topbar .q-btn.topbar-restart:hover .q-btn__content { color: #fff !important; }
-/* 등록 자동화 — 보라 (기본 nav-btn과 동일하지만 active 시 강조 색 다르게) */
+/* 1단계 상품수집 — 보라 (기본 nav-btn과 동일하지만 active 시 강조 색 다르게) */
 .topbar .q-btn.nav-btn-home.active,
 .topbar .q-btn.nav-btn-home.active:before {
   background: linear-gradient(135deg, #7c3aed, #4f46e5) !important;
@@ -4512,9 +4520,15 @@ def _make_nav_header(current: str):
         # 로고
         ui.html('<div class="topbar-logo">🛒 <span>네이버 → 쿠팡</span></div>')
 
-        # 네비 버튼
+        # ── 네비 버튼: 1단계 → 2단계 묶음 → 가격변동알림 → [spacer] → 재시작
         home_cls = "nav-btn nav-btn-home active" if current == "main" else "nav-btn nav-btn-home"
-        ui.button("📦 등록 자동화", on_click=lambda: ui.navigate.to("/")).classes(home_cls)
+        ui.button("📦 1단계 상품수집", on_click=lambda: ui.navigate.to("/")).classes(home_cls)
+
+        fix_cls = "nav-btn nav-btn-excel active" if current == "error-fix" else "nav-btn nav-btn-excel"
+        ui.button("📗 2단계 엑셀 검수", on_click=lambda: ui.navigate.to("/error-fix")).classes(fix_cls)
+
+        # 1단계·2단계 묶음과 가격변동알림 사이 구분선
+        ui.html('<div class="nav-divider"></div>')
 
         mon_cls = "nav-btn nav-btn-alert active" if current == "monitor" else "nav-btn nav-btn-alert"
         if has_any:
@@ -4525,9 +4539,6 @@ def _make_nav_header(current: str):
         if sold_n:   alert_label += f" 品{sold_n}"
         if restocked_n: alert_label += f" 🟢{restocked_n}"
         ui.button(alert_label, on_click=lambda: ui.navigate.to("/monitor")).classes(mon_cls)
-
-        fix_cls = "nav-btn nav-btn-excel active" if current == "error-fix" else "nav-btn nav-btn-excel"
-        ui.button("📗 엑셀수정", on_click=lambda: ui.navigate.to("/error-fix")).classes(fix_cls)
 
         ui.html('<div class="nav-spacer"></div>')
 
