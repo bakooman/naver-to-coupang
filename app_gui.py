@@ -1998,8 +1998,7 @@ async def _process_entry(
         log_(f"[{entry.uid[:6]}] 크롤 완료: {product.name} (브랜드: {entry.brand})")
 
         # ── 브랜드 매핑 변환 (영문→한국어, 한국어→공식명) ───────────────
-        # Gemini가 이미 최적 브랜드명을 추출했으면 스킵 (영문→한글 역변환 방지)
-        # 규칙 기반(2순위) 추출 시에만 실행 + brand_map.json 히트 시에만 변환
+        # 규칙 기반(2순위) 추출 시에만 Gemini 재질의 + brand_map 변환
         if entry.brand and not entry.brand_locked and not _brand_from_gemini:
             _brand_before = entry.brand
             entry.brand = await _resolve_brand_korean(entry.brand, product.name)
@@ -2007,6 +2006,17 @@ async def _process_entry(
                 log_(f"[{entry.uid[:6]}] 브랜드 변환: '{_brand_before}' → '{entry.brand}'")
         elif entry.brand and entry.brand_locked:
             log_(f"[{entry.uid[:6]}] 브랜드 사용자 지정(🔒): '{entry.brand}' — 변환 스킵")
+
+        # ── brand_map 사용자 수정 오버라이드 (Gemini 감지 이후에도 항상 체크) ──
+        # 사용자가 수동 수정한 브랜드(예: HARIBO→하리보)는 Gemini 감지 결과보다 우선
+        if entry.brand and not entry.brand_locked:
+            _bmap_ov = _load_brand_map()
+            _bkey_ov = entry.brand.strip().lower()
+            for _bmk, _bmv in _bmap_ov.items():
+                if _bmk.strip().lower() == _bkey_ov and _bmv != entry.brand:
+                    log_(f"[{entry.uid[:6]}] 브랜드맵 오버라이드: '{entry.brand}' → '{_bmv}'")
+                    entry.brand = _bmv
+                    break
 
         # ── 브랜드 쿠팡 공식 DB 매칭 ────────────────────────────────────
         # 영문/한글 양방향 검색 → 유사도 검증 → 공식 브랜드 확정
@@ -2050,9 +2060,12 @@ async def _process_entry(
                     f"상품명(전체): {product.name}\n"
                     f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
                     "이 상품에 맞는 쿠팡 Wing 카테고리 소분류 명칭을 1~3개 답하세요.\n\n"
-                    "⚠️ 핵심 규칙: 상품명/네이버카테고리에 강아지/고양이/소형견/대형견/"
+                    "⚠️ 필수 분류 규칙:\n"
+                    "1. 식품 젤리(캔디/구미/젤리빈/하리보 등) → 반드시 '캔디/젤리' 또는 '사탕' 카테고리."
+                    " 절대 '젤리/우레탄밴드', '젤리슈즈', '젤리시계' 등 비식품 카테고리 금지.\n"
+                    "2. 상품명/네이버카테고리에 강아지/고양이/소형견/대형견/"
                     "반려견/반려묘/펫/pet 등 반려동물 키워드가 있으면\n"
-                    "절대 사람용 건강기능식품/비타민/영양제 카테고리 선택 금지."
+                    "   절대 사람용 건강기능식품/비타민/영양제 카테고리 선택 금지."
                     " 반드시 반려동물 전용 카테고리를 선택하세요.\n\n"
                     "강아지 Wing 카테고리 소분류 예시:\n"
                     "  관절/칼슘 보조제 → 칼슘/관절영양제\n"
@@ -8303,20 +8316,35 @@ def page() -> None:
                                                 if e_ref.result_item:
                                                     e_ref.result_item.brand = v
                                                     e_ref.result_item.manufacturer = v
-                                                # 같은 브랜드 항목 전체에 전파 (미잠금 항목만)
+                                                # 큐 전체 전파: ① 같은 old_brand 항목, ② 같은 source_file의 미수집(pending) 항목
                                                 _prop_count = 0
+                                                _src = e_ref.source_file or ""
+                                                for _pe in queue:
+                                                    if _pe.uid == e_ref.uid or _pe.brand_locked:
+                                                        continue
+                                                    _pe_brand = (_pe.brand or "").strip()
+                                                    # ①  이미 수집된 항목 중 동일 old_brand
+                                                    _match_done = (
+                                                        old_brand
+                                                        and old_brand.upper() != v.upper()
+                                                        and _pe_brand.upper() == old_brand.upper()
+                                                    )
+                                                    # ②  미수집(pending) + 같은 source_file + 브랜드 미설정
+                                                    _match_pending = (
+                                                        _pe.status == "pending"
+                                                        and not _pe_brand
+                                                        and _src
+                                                        and _pe.source_file == _src
+                                                    )
+                                                    if _match_done or _match_pending:
+                                                        _pe.brand = v
+                                                        _pe.brand_locked = True
+                                                        if _pe.result_item:
+                                                            _pe.result_item.brand = v
+                                                            _pe.result_item.manufacturer = v
+                                                        _prop_count += 1
+                                                # brand_map.json 저장 → 수집 중 자동 적용 (Gemini 감지 이후에도)
                                                 if old_brand and old_brand.upper() != v.upper():
-                                                    for _pe in queue:
-                                                        if _pe.uid == e_ref.uid or _pe.brand_locked:
-                                                            continue
-                                                        if (_pe.brand or "").strip().upper() == old_brand.upper():
-                                                            _pe.brand = v
-                                                            _pe.brand_locked = True
-                                                            if _pe.result_item:
-                                                                _pe.result_item.brand = v
-                                                                _pe.result_item.manufacturer = v
-                                                            _prop_count += 1
-                                                    # brand_map.json 저장 → 이후 신규수집도 자동 적용
                                                     _bmap = _load_brand_map()
                                                     _bmap[old_brand] = v
                                                     _save_brand_map(_bmap)
@@ -8371,14 +8399,25 @@ def page() -> None:
                                                 e_ref.category_is_manual = bool(v)
                                                 if e_ref.result_item:
                                                     e_ref.result_item.category_id = v
-                                                # 같은 브랜드 항목에 카테고리 전파 (미잠금 항목만)
+                                                # 큐 전체 카테고리 전파: ① 같은 브랜드 항목, ② 같은 source_file의 pending 항목
                                                 _prop_count = 0
                                                 _cur_brand = (e_ref.brand or "").strip()
-                                                if v and _cur_brand:
+                                                _src_cat = e_ref.source_file or ""
+                                                if v:
                                                     for _pe in queue:
                                                         if _pe.uid == e_ref.uid or _pe.category_is_manual:
                                                             continue
-                                                        if (_pe.brand or "").strip() == _cur_brand:
+                                                        _pe_brand = (_pe.brand or "").strip()
+                                                        # ① 이미 수집된 항목 중 동일 브랜드
+                                                        _match_done = _cur_brand and _pe_brand == _cur_brand
+                                                        # ② 미수집(pending) + 같은 source_file + 카테고리 미설정
+                                                        _match_pending = (
+                                                            _pe.status == "pending"
+                                                            and not _pe.category_id
+                                                            and _src_cat
+                                                            and _pe.source_file == _src_cat
+                                                        )
+                                                        if _match_done or _match_pending:
                                                             _pe.category_id = v
                                                             _pe.category_is_manual = True
                                                             if _pe.result_item:

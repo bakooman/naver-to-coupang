@@ -326,6 +326,15 @@ class CategoryDetector:
         Returns:
           (category_id, gosisi_cat, matched_name) or None (점수 0.3 미만 제외)
         """
+        # 0순위: category_map.json 직접 키워드 매핑 (wing 검색보다 우선)
+        # Gemini가 반환한 카테고리명이 사전에 있으면 즉시 사용 (오매핑 방지)
+        _kw_lower = keyword.strip().lower()
+        for _mk, _md in self._keywords.items():
+            if _mk.startswith("──") or not isinstance(_md, dict):
+                continue
+            if _mk.strip().lower() == _kw_lower and _md.get("category_id"):
+                return (_md["category_id"], _md.get("gosisi_cat", "기타 재화"), _mk)
+
         flat = _load_wing_flat()
         if not flat or not keyword.strip():
             return None
