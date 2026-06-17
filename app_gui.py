@@ -6004,9 +6004,21 @@ async def page_error_fix() -> None:
 
                         total    = len(products)
                         fix_results: list[FixResult] = []
+                        # brand_map 로드 (수집 파이프라인의 사용자 수정 이력)
+                        _bmap = _load_brand_map()
+
+                        def _apply_bmap(brand: str) -> str:
+                            if not brand or not _bmap:
+                                return brand
+                            bl = brand.strip().lower()
+                            for k, v in _bmap.items():
+                                if k.strip().lower() == bl:
+                                    return v
+                            return brand
 
                         for i, prod in enumerate(products):
                             prod["_cat_name"] = _det.get_name_by_id(prod["category_id"])
+                            _missing_opts = prod.get("missing_required_opts", [])
                             prog_label.set_text(
                                 f"[{i+1}/{total}] {prod['product_name'][:45]}"
                             )
@@ -6014,11 +6026,13 @@ async def page_error_fix() -> None:
                             if _api_key:
                                 g = await loop.run_in_executor(
                                     None,
-                                    lambda p=dict(prod): gemini_check(p, _api_key, _model),
+                                    lambda p=dict(prod), mo=list(_missing_opts):
+                                        gemini_check(p, _api_key, _model, missing_opts=mo),
                                 )
                             else:
                                 g = {"needs_fix": False, "category_keyword": "",
-                                     "brand": prod["brand"], "reason": "GEMINI_API_KEY 미설정"}
+                                     "brand": prod["brand"], "reason": "GEMINI_API_KEY 미설정",
+                                     "option_values": {}}
 
                             new_cat_id   = prod["category_id"]
                             new_cat_name = prod["_cat_name"]
@@ -6029,12 +6043,29 @@ async def page_error_fix() -> None:
                                 if found:
                                     new_cat_id, new_gosisi, new_cat_name = found
 
-                            raw_new_brand = (g.get("brand") or prod["brand"]).strip()
-                            new_brand     = raw_new_brand if raw_new_brand else prod["brand"]
-                            cat_chg       = new_cat_id != prod["category_id"]
-                            brand_chg     = new_brand.lower() != (prod["brand"] or "").lower()
-                            opt_issues    = prod.get("has_option_issues", False)
-                            needs_fix     = g.get("needs_fix", False) or cat_chg or brand_chg or opt_issues
+                            # 브랜드: brand_map 우선 → Gemini 제안 → 원본 유지
+                            raw_gemini_brand  = (g.get("brand") or prod["brand"]).strip()
+                            bmap_of_orig      = _apply_bmap(prod["brand"])
+                            bmap_of_gemini    = _apply_bmap(raw_gemini_brand)
+                            if bmap_of_orig != prod["brand"]:
+                                new_brand = bmap_of_orig        # 수집 파이프라인 수정 이력 우선
+                            elif bmap_of_gemini != raw_gemini_brand:
+                                new_brand = bmap_of_gemini      # Gemini 제안이 brand_map에 매핑됨
+                            else:
+                                new_brand = raw_gemini_brand or prod["brand"]
+
+                            # 누락 필수 옵션 Gemini 추정값 (option_values 필드)
+                            raw_opt_vals: dict = g.get("option_values") or {}
+                            # missing_opts에 있는 타입만 채택
+                            missing_opt_values = {
+                                k: str(v) for k, v in raw_opt_vals.items()
+                                if k in _missing_opts and v
+                            }
+
+                            cat_chg    = new_cat_id != prod["category_id"]
+                            brand_chg  = new_brand.lower() != (prod["brand"] or "").lower()
+                            opt_issues = prod.get("has_option_issues", False)
+                            needs_fix  = g.get("needs_fix", False) or cat_chg or brand_chg or opt_issues
 
                             fix_results.append(FixResult(
                                 product_name          = prod["product_name"],
@@ -6050,7 +6081,8 @@ async def page_error_fix() -> None:
                                 row_indices           = prod["row_indices"],
                                 dup_rows              = prod.get("dup_rows", []),
                                 invalid_option_types  = prod.get("invalid_option_types", []),
-                                missing_required_opts = prod.get("missing_required_opts", []),
+                                missing_required_opts = _missing_opts,
+                                missing_opt_values    = missing_opt_values,
                                 has_option_issues     = opt_issues,
                             ))
                             prog_bar.set_value((i + 1) / total)
@@ -6219,13 +6251,26 @@ async def page_error_fix() -> None:
                                 "color:#dc2626; font-weight:600"
                             )
                         if fr.invalid_option_types:
-                            ui.label(f"⚠ 유효하지 않은 옵션: {', '.join(fr.invalid_option_types[:3])}").style(
+                            ui.label(f"⚠ 잘못된 옵션타입: {', '.join(fr.invalid_option_types[:3])}").style(
                                 "color:#d97706"
                             )
                         if fr.missing_required_opts:
-                            ui.label(f"❗ 누락 필수옵션: {', '.join(fr.missing_required_opts[:3])}").style(
-                                "color:#7c3aed"
-                            )
+                            if fr.missing_opt_values:
+                                # Gemini가 값 추정한 경우
+                                for opt_t, opt_v in fr.missing_opt_values.items():
+                                    ui.label(f"➕ {opt_t}={opt_v} 행 추가").style(
+                                        "color:#7c3aed; font-weight:600"
+                                    )
+                                no_val = [o for o in fr.missing_required_opts
+                                          if o not in fr.missing_opt_values]
+                                if no_val:
+                                    ui.label(f"❗ 값 미추정: {', '.join(no_val[:3])}").style(
+                                        "color:#dc2626"
+                                    )
+                            else:
+                                ui.label(f"❗ 누락 필수옵션: {', '.join(fr.missing_required_opts[:3])}").style(
+                                    "color:#7c3aed"
+                                )
                         if not fr.has_option_issues:
                             ui.label("✓ 정상").style("color:#9ca3af")
 
