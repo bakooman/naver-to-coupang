@@ -4161,6 +4161,8 @@ html, body {
   box-shadow: none !important;
   text-transform: none !important;
   letter-spacing: 0 !important;
+  margin-left: 24px !important;
+  margin-right: 8px !important;
 }
 .topbar .q-btn.topbar-restart:hover,
 .topbar .q-btn.topbar-restart:hover:before {
