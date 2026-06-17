@@ -7320,7 +7320,111 @@ def page() -> None:
                                 ui.notify("✅ 엑셀 재생성 완료!", type="positive")
                             ui.button("📥 엑셀 재생성", on_click=_regen_excel).props("color=indigo dense outline")
 
-                    # ⑤ 큐 아이템 컨테이너 (스크롤 네비 타겟)
+                    # ⑤ 일괄변경 패널
+                    with ui.card().classes("w-full shadow-sm mb-1").style("background:#f8fafc"):
+                        with ui.card_section().classes("py-2"):
+                            ui.label("일괄변경").classes("text-xs font-bold text-slate-500 mb-1")
+                            with ui.row().classes("items-end gap-2 flex-wrap"):
+                                # 브랜드 선택 드롭다운
+                                def _get_queue_brands():
+                                    return sorted(set(
+                                        (e.brand or "").strip()
+                                        for e in _global_queue if (e.brand or "").strip()
+                                    ))
+                                _bulk_old_brand = ui.select(
+                                    options=[], label="변경할 브랜드 선택",
+                                    new_value_mode=None,
+                                ).props("dense outlined clearable").style("min-width:180px")
+                                _bulk_new_brand = ui.input(
+                                    placeholder="새 브랜드명 (비워두면 변경 안 함)"
+                                ).props("dense outlined clearable").style("min-width:180px")
+
+                                # 카테고리 검색
+                                _bulk_cat_id   = {"v": ""}
+                                _bulk_cat_name = {"v": ""}
+                                _bulk_cat_lbl  = ui.label("카테고리 미선택").classes("text-xs text-slate-400 self-center")
+
+                                async def _open_bulk_cat_search():
+                                    _flat = _get_wing_cat_flat()
+                                    if not _flat:
+                                        ui.notify("카테고리 데이터 없음", type="negative")
+                                        return
+                                    with ui.dialog() as _cd, ui.card().style("min-width:420px"):
+                                        ui.label("카테고리 검색").classes("font-bold mb-2")
+                                        _cs_inp = ui.input(placeholder="카테고리명 검색").props("dense outlined autofocus").style("width:100%")
+                                        _cs_res = ui.column().classes("gap-1 max-h-64 overflow-y-auto w-full mt-1")
+                                        def _cs_search(v=""):
+                                            kw = (v or _cs_inp.value or "").strip().lower()
+                                            _cs_res.clear()
+                                            with _cs_res:
+                                                hits = [c for c in _flat if kw in (c.get("name","") + c.get("label","")).lower()] if kw else _flat[:50]
+                                                for c in hits[:60]:
+                                                    cname = c.get("name") or c.get("label","")
+                                                    cid   = str(c.get("code",""))
+                                                    def _pick(cid=cid, cname=cname):
+                                                        _bulk_cat_id["v"]   = cid
+                                                        _bulk_cat_name["v"] = cname
+                                                        _bulk_cat_lbl.set_text(f"카테고리: {cname} ({cid})")
+                                                        _bulk_cat_lbl.classes(remove="text-slate-400", add="text-blue-600")
+                                                        _cd.close()
+                                                    ui.button(f"{cname}  ({cid})", on_click=_pick).props("flat dense align=left").style("width:100%;font-size:12px")
+                                        _cs_inp.on("input", lambda e: _cs_search(e.value))
+                                        _cs_search()
+                                        ui.button("닫기", on_click=_cd.close).props("flat dense color=grey").classes("mt-1")
+                                    _cd.open()
+
+                                ui.button("카테고리 검색", icon="search", on_click=_open_bulk_cat_search).props("dense outline color=blue size=sm")
+                                _bulk_cat_lbl
+
+                                async def _apply_bulk_change():
+                                    old_b = (_bulk_old_brand.value or "").strip()
+                                    new_b = (_bulk_new_brand.value or "").strip()
+                                    new_cid = _bulk_cat_id["v"]
+                                    new_cname = _bulk_cat_name["v"]
+                                    if not old_b:
+                                        ui.notify("변경할 브랜드를 선택하세요", type="warning")
+                                        return
+                                    if not new_b and not new_cid:
+                                        ui.notify("새 브랜드명 또는 카테고리를 입력하세요", type="warning")
+                                        return
+                                    cnt = 0
+                                    for _e in _global_queue:
+                                        if (_e.brand or "").strip().upper() != old_b.upper():
+                                            continue
+                                        if new_b:
+                                            _e.brand = new_b
+                                            _e.brand_locked = True
+                                            if _e.result_item:
+                                                _e.result_item.brand = new_b
+                                                _e.result_item.manufacturer = new_b
+                                        if new_cid:
+                                            _e.category_id = new_cid
+                                            _e.category_is_manual = True
+                                            if _e.result_item:
+                                                _e.result_item.category_id = new_cid
+                                        cnt += 1
+                                    if new_b and old_b.upper() != new_b.upper():
+                                        _bmap = _load_brand_map()
+                                        _bmap[old_b] = new_b
+                                        _save_brand_map(_bmap)
+                                    msg = f"일괄변경 완료: {cnt}개 항목"
+                                    if new_b: msg += f" | 브랜드 {old_b}→{new_b}"
+                                    if new_cid: msg += f" | 카테고리→{new_cname}"
+                                    ui.notify(msg, type="positive", timeout=3000)
+                                    _bulk_new_brand.set_value("")
+                                    _bulk_cat_id["v"] = ""
+                                    _bulk_cat_name["v"] = ""
+                                    _bulk_cat_lbl.set_text("카테고리 미선택")
+                                    _bulk_cat_lbl.classes(remove="text-blue-600", add="text-slate-400")
+                                    _render_queue()
+
+                                ui.button("일괄변경", icon="edit", on_click=_apply_bulk_change).props("dense color=primary size=sm")
+
+                    def _refresh_bulk_brand_list():
+                        _bulk_old_brand.options = _get_queue_brands()
+                        _bulk_old_brand.update()
+
+                    # ⑥ 큐 아이템 컨테이너 (스크롤 네비 타겟)
                     queue_container = ui.column().classes("w-full gap-2 px-2 pb-2")
                     empty_label = ui.label(
                         "⬆️  왼쪽에서 URL을 입력하고 추가하세요."
@@ -7789,6 +7893,7 @@ def page() -> None:
         queue_container.clear()
         queue_count_lbl.set_text(f"등록 대기 목록 ({len(queue)}개)")
         empty_label.set_visibility(len(queue) == 0)
+        _refresh_bulk_brand_list()
 
         # ── 출처 요약 라벨 ────────────────────────────────────────
         _txt_files   = []
