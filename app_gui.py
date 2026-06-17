@@ -5966,7 +5966,7 @@ async def page_error_fix() -> None:
             with ui.card().classes("shadow-sm w-full mb-4"):
                 with ui.card_section():
                     ui.label("① 파일 업로드").classes("font-bold text-slate-700 text-sm mb-2")
-                    file_label = ui.label("선택된 파일 없음").classes("text-xs text-slate-400 mb-2 block")
+                    file_label = ui.label("파일을 선택하세요 (앱 재시작 후에는 파일을 다시 선택해야 합니다)").classes("text-xs text-slate-400 mb-2 block")
 
                     async def _on_upload(e):
                         import tempfile as _tf
@@ -6020,7 +6020,7 @@ async def page_error_fix() -> None:
                         if _st.get("processing"):
                             return
                         if not _st.get("src_path"):
-                            ui.notify("먼저 엑셀 파일을 업로드하세요", type="warning")
+                            ui.notify("파일을 다시 선택해주세요 — 앱 재시작 후에는 업로드 UI에 파일이 보여도 서버에 파일이 없습니다. + 버튼으로 재선택하세요.", type="warning", timeout=6000)
                             return
                         products = _st.get("products", [])
                         if not products:
