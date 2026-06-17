@@ -10364,7 +10364,7 @@ def page_price_fix() -> None:
             # 헤더는 row 2 (0-indexed), 데이터는 row 3+
             # 컬럼: 0=업체상품ID, 6=쿠팡노출명, 7=업체등록명, 8=옵션명, 9=판매가격
             _rows.clear()
-            _raw_wb = _opxl.load_workbook(tmp.name)
+            _raw_wb = _opxl.load_workbook(tmp.name, keep_vba=True)
 
             # 헤더 행 탐지: 셀 값이 짧고 정확히 '업체상품 ID' / 'Product ID' 인 행
             # (row0 설명 텍스트는 수천 자 → 길이 제한으로 제외)
@@ -10528,22 +10528,28 @@ def page_price_fix() -> None:
                     excel_row = DATA_START_ROW + i
                     ws.cell(row=excel_row, column=PRICE_COL, value=r["new_price"])
 
-            # 임시 파일로 저장 후 다운로드
-            out_tmp = _tf2.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            # 임시 파일로 저장 후 다운로드 — 원본 확장자(.xlsm) 유지
+            orig_ext = _Path2(_fname_holder["v"]).suffix.lower() or ".xlsx"
+            out_tmp = _tf2.NamedTemporaryFile(delete=False, suffix=orig_ext)
             out_tmp.close()
             _raw_wb.save(out_tmp.name)
 
             orig_stem = _Path2(_fname_holder["v"]).stem
-            dl_name = f"{orig_stem}_가격수정.xlsx"
+            dl_name = f"{orig_stem}_가격수정{orig_ext}"
 
             with open(out_tmp.name, "rb") as f:
                 data = f.read()
 
             import base64 as _b64
             b64 = _b64.b64encode(data).decode()
+            _mime = (
+                "application/vnd.ms-excel.sheet.macroEnabled.12"
+                if orig_ext == ".xlsm"
+                else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
             ui.run_javascript(f"""
                 const a = document.createElement('a');
-                a.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}';
+                a.href = 'data:{_mime};base64,{b64}';
                 a.download = '{dl_name}';
                 document.body.appendChild(a);
                 a.click();
