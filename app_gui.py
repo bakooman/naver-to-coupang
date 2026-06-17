@@ -6017,11 +6017,14 @@ async def page_error_fix() -> None:
                     prog_bar.set_visibility(False)
 
                     async def _on_start():
-                        if not _st.get("src_path") or _st["processing"]:
+                        if _st.get("processing"):
+                            return
+                        if not _st.get("src_path"):
+                            ui.notify("먼저 엑셀 파일을 업로드하세요", type="warning")
                             return
                         products = _st.get("products", [])
                         if not products:
-                            ui.notify("상품 데이터가 없습니다.", type="warning")
+                            ui.notify("파일을 다시 업로드하세요 (상품 데이터 없음)", type="warning")
                             return
 
                         _st["processing"] = True
@@ -6146,7 +6149,6 @@ async def page_error_fix() -> None:
                     start_btn = ui.button(
                         "🔍 검수 시작", icon="search", on_click=_on_start
                     ).props("color=primary").classes("mt-2")
-                    start_btn.set_enabled(False)
 
             # ── ③ 변경 사항 미리보기 ─────────────────────────
             with ui.card().classes("shadow-sm w-full mb-4"):
@@ -7321,22 +7323,24 @@ def page() -> None:
                             ui.button("📥 엑셀 재생성", on_click=_regen_excel).props("color=indigo dense outline")
 
                     # ⑤ 일괄변경 패널
+                    def _get_queue_brands():
+                        return sorted(set(
+                            (e.brand or "").strip()
+                            for e in _global_queue if (e.brand or "").strip()
+                        ))
+
                     with ui.card().classes("w-full shadow-sm mb-1").style("background:#f8fafc"):
                         with ui.card_section().classes("py-2"):
-                            ui.label("일괄변경").classes("text-xs font-bold text-slate-500 mb-1")
+                            with ui.row().classes("items-center justify-between mb-1"):
+                                ui.label("일괄변경").classes("text-xs font-bold text-slate-500")
+                                ui.label("수집 중/완료 모두 적용").classes("text-xs text-slate-400")
                             with ui.row().classes("items-end gap-2 flex-wrap"):
-                                # 브랜드 선택 드롭다운
-                                def _get_queue_brands():
-                                    return sorted(set(
-                                        (e.brand or "").strip()
-                                        for e in _global_queue if (e.brand or "").strip()
-                                    ))
                                 _bulk_old_brand = ui.select(
-                                    options=[], label="변경할 브랜드 선택",
+                                    options=_get_queue_brands(), label="변경할 브랜드 선택",
                                     new_value_mode=None,
                                 ).props("dense outlined clearable").style("min-width:180px")
                                 _bulk_new_brand = ui.input(
-                                    placeholder="새 브랜드명 (비워두면 변경 안 함)"
+                                    placeholder="새 브랜드명 (비워두면 브랜드 유지)"
                                 ).props("dense outlined clearable").style("min-width:180px")
 
                                 # 카테고리 검색
@@ -7381,15 +7385,16 @@ def page() -> None:
                                     new_b = (_bulk_new_brand.value or "").strip()
                                     new_cid = _bulk_cat_id["v"]
                                     new_cname = _bulk_cat_name["v"]
-                                    if not old_b:
-                                        ui.notify("변경할 브랜드를 선택하세요", type="warning")
-                                        return
                                     if not new_b and not new_cid:
                                         ui.notify("새 브랜드명 또는 카테고리를 입력하세요", type="warning")
                                         return
+                                    if not _global_queue:
+                                        ui.notify("큐가 비어있습니다", type="warning")
+                                        return
                                     cnt = 0
                                     for _e in _global_queue:
-                                        if (_e.brand or "").strip().upper() != old_b.upper():
+                                        # 브랜드 필터: 선택된 경우만 필터링, 미선택 시 전체 대상
+                                        if old_b and (_e.brand or "").strip().upper() != old_b.upper():
                                             continue
                                         if new_b:
                                             _e.brand = new_b
@@ -7403,14 +7408,17 @@ def page() -> None:
                                             if _e.result_item:
                                                 _e.result_item.category_id = new_cid
                                         cnt += 1
-                                    if new_b and old_b.upper() != new_b.upper():
+                                    # brand_map 저장 — 수집 중 pending 항목도 이 맵으로 처리됨
+                                    if new_b:
                                         _bmap = _load_brand_map()
-                                        _bmap[old_b] = new_b
+                                        if old_b and old_b.upper() != new_b.upper():
+                                            _bmap[old_b] = new_b
                                         _save_brand_map(_bmap)
                                     msg = f"일괄변경 완료: {cnt}개 항목"
-                                    if new_b: msg += f" | 브랜드 {old_b}→{new_b}"
-                                    if new_cid: msg += f" | 카테고리→{new_cname}"
-                                    ui.notify(msg, type="positive", timeout=3000)
+                                    if old_b: msg += f" (브랜드: {old_b})"
+                                    if new_b: msg += f" → 브랜드: {new_b}"
+                                    if new_cid: msg += f" / 카테고리: {new_cname}"
+                                    ui.notify(msg, type="positive", timeout=4000)
                                     _bulk_new_brand.set_value("")
                                     _bulk_cat_id["v"] = ""
                                     _bulk_cat_name["v"] = ""
