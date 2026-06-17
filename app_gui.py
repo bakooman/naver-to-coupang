@@ -10249,8 +10249,9 @@ def page_price_fix() -> None:
     _fname_holder = {"v": ""}
     _meta = {"data_start_row": 4, "newprice_col": 16}  # Excel 1-indexed
 
-    def _patch_xlsx_prices(raw: bytes, row_price_map: dict, price_col: int) -> bytes:
-        """원본 xlsx/xlsm bytes를 ZIP 레벨에서 직접 패치 — openpyxl save() 사용 안 함."""
+    def _patch_xlsx_prices(raw: bytes, row_price_map: dict, price_col: int):
+        """원본 xlsx/xlsm bytes를 ZIP 레벨에서 직접 패치 — openpyxl save() 사용 안 함.
+        Returns (patched_bytes, patched_count)."""
         import zipfile, io as _io2, re as _re2
 
         def _col_letter(n: int) -> str:
@@ -10261,8 +10262,8 @@ def page_price_fix() -> None:
             return s
 
         col_letter = _col_letter(price_col)
-        # {ref: price}  예) {"N4": 19840, "N5": 22000, ...}
         targets = {f"{col_letter}{row}": price for row, price in row_price_map.items()}
+        patched_count = 0
 
         src = _io2.BytesIO(raw)
         dst = _io2.BytesIO()
@@ -10275,25 +10276,45 @@ def page_price_fix() -> None:
                         text = data.decode("utf-8")
                         for ref, new_price in targets.items():
                             row_num = int(_re2.sub(r'[A-Z]+', '', ref))
+                            replaced = False
 
-                            # ① 기존 셀 교체 시도
+                            # ① 일반 셀 교체: <c r="X4">...</c>
                             def _replacer(m, _p=new_price):
                                 inner = m.group(0)
                                 if "<v>" in inner:
                                     inner = _re2.sub(r"<v>[^<]*</v>", f"<v>{_p}</v>", inner)
                                 else:
                                     inner = inner[:-4] + f"<v>{_p}</v></c>"
-                                # shared-string 타입 제거 (숫자로 덮어쓸 때)
                                 inner = _re2.sub(r'\s*t="[^"]*"', '', inner, count=1)
                                 return inner
 
-                            pat = (r'<c\b[^>]*\br="'
-                                   + _re2.escape(ref)
-                                   + r'"[^>]*>(?:(?!</c>).)*</c>')
-                            new_text = _re2.sub(pat, _replacer, text, flags=_re2.DOTALL)
+                            pat_full = (r'<c\b[^>]*\br="'
+                                        + _re2.escape(ref)
+                                        + r'"[^>]*>(?:(?!</c>).)*</c>')
+                            new_text = _re2.sub(pat_full, _replacer, text, flags=_re2.DOTALL)
+                            if new_text != text:
+                                text = new_text
+                                replaced = True
 
-                            if new_text == text:
-                                # ② 셀이 없음 → 해당 행에 새 셀 삽입
+                            if not replaced:
+                                # ② 자기닫힘 셀: <c r="X4" s="N"/> (값 없이 스타일만 있는 빈 셀)
+                                def _replacer_self(m, _p=new_price):
+                                    inner = m.group(0)
+                                    inner = _re2.sub(r'\s*t="[^"]*"', '', inner)
+                                    # /> → ><v>price</v></c>
+                                    inner = _re2.sub(r'\s*/>\s*$', f'><v>{_p}</v></c>', inner)
+                                    return inner
+
+                                pat_self = (r'<c\b[^>]*\br="'
+                                            + _re2.escape(ref)
+                                            + r'"[^>]*/>')
+                                new_text = _re2.sub(pat_self, _replacer_self, text)
+                                if new_text != text:
+                                    text = new_text
+                                    replaced = True
+
+                            if not replaced:
+                                # ③ 셀 자체 없음 → 해당 행에 새 셀 삽입
                                 row_pat = (r'(<row\b[^>]*\br="'
                                            + str(row_num)
                                            + r'"[^>]*>)((?:(?!</row>).)*)(</row>)')
@@ -10301,12 +10322,10 @@ def page_price_fix() -> None:
 
                                 def _insert(m, _nc=new_cell, _cl=col_letter, _rn=row_num):
                                     content = m.group(2)
-                                    # 열 순서 유지: 우리 열보다 큰 열 앞에 삽입
                                     later = _re2.search(
                                         r'<c\b[^>]*\br="([A-Z]+)' + str(_rn) + r'"', content)
                                     if later:
                                         ltr = later.group(1)
-                                        # 알파벳 비교로 삽입 위치 결정
                                         if ltr > _cl:
                                             content = content.replace(later.group(0), _nc + later.group(0), 1)
                                         else:
@@ -10316,11 +10335,16 @@ def page_price_fix() -> None:
                                     return m.group(1) + content + m.group(3)
 
                                 new_text = _re2.sub(row_pat, _insert, text, flags=_re2.DOTALL)
+                                if new_text != text:
+                                    text = new_text
+                                    replaced = True
 
-                            text = new_text
+                            if replaced:
+                                patched_count += 1
+
                         data = text.encode("utf-8")
                     zout.writestr(item, data)
-        return dst.getvalue()
+        return dst.getvalue(), patched_count
 
     with ui.element("div").props("id=page-wrap"):
         _make_nav_header("price-fix")
@@ -10612,9 +10636,20 @@ def page_price_fix() -> None:
                     row_price_map[DATA_START_ROW + i] = r["new_price"]
 
             try:
-                patched = _patch_xlsx_prices(_raw_bytes[0], row_price_map, PRICE_COL)
+                patched, _n_patched = _patch_xlsx_prices(_raw_bytes[0], row_price_map, PRICE_COL)
             except Exception as ex:
                 ui.notify(f"❌ 파일 패치 실패: {ex}", color="negative")
+                return
+            if _n_patched == 0:
+                def _cl(n):
+                    s = ""
+                    while n > 0:
+                        n, r2 = divmod(n - 1, 26)
+                        s = chr(65 + r2) + s
+                    return s
+                ui.notify(f"⚠️ 셀 패치 0개 — 기입열:{_cl(PRICE_COL)} 매칭:{len(row_price_map)}개. "
+                          "Wing 엑셀 구조가 다를 수 있으니 스크린샷 찍어 공유해주세요.",
+                          color="warning", timeout=20000)
                 return
 
             orig_ext  = _Path2(_fname_holder["v"]).suffix.lower() or ".xlsx"
@@ -10636,7 +10671,7 @@ def page_price_fix() -> None:
                 a.click();
                 document.body.removeChild(a);
             """)
-            ui.notify(f"✅ {dl_name} 다운로드 시작! ({len(row_price_map)}개 가격 수정)", color="positive")
+            ui.notify(f"✅ {dl_name} 다운로드 시작! (셀 패치 {_n_patched}개 / 매칭 {len(row_price_map)}개)", color="positive")
 
         # 업로드 컴포넌트
         with ui.card().classes("shadow-sm w-full mb-3"):
