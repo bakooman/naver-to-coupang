@@ -1971,37 +1971,80 @@ class WingAutomator:
                 continue
 
             # ── 로켓그로스 판매방식 선택 팝업 사전 처리 ─────────────────
-            # Wing이 "판매 방식에 로켓그로스가 추가되었습니다" 팝업을 추가함.
-            # 이 팝업에서 판매자배송을 선택하지 않으면 상품등록이 실제로 반영 안 됨.
-            _rg_result = await pg.evaluate("""
+            # pg.mouse.click(x,y): CDP 레벨 실제 마우스 클릭 → Vue 무조건 반응
+            # RG 팝업 컨테이너를 먼저 특정 → 그 안에서만 라디오/확인 탐색 (폼 오클릭 방지)
+            _JS_RG_COORDS = """
                 () => {
                     const body = document.body.innerText || '';
-                    if (!body.includes('로켓그로스')) return 'no_popup';
-                    // 판매자배송 버튼/라디오/레이블 클릭
-                    let sel = false;
-                    for (const el of document.querySelectorAll('button, label, input[type="radio"]')) {
+                    if (!body.includes('로켓그로스') ||
+                        (!body.includes('판매방식') && !body.includes('판매 방식')))
+                        return null;
+
+                    // 1) 로켓그로스+판매방식 텍스트를 모두 포함하는 가장 작은(innermost) 컨테이너 탐색
+                    let rgBox = null;
+                    for (const el of document.querySelectorAll('div,section,article,dialog,[role="dialog"]')) {
                         if (!el.offsetParent) continue;
-                        const t = (el.textContent || el.getAttribute('value') || '').trim();
-                        if (t === '판매자배송') { el.click(); sel = true; break; }
+                        const t = el.textContent || '';
+                        if (!t.includes('로켓그로스')) continue;
+                        if (!t.includes('판매방식') && !t.includes('판매 방식')) continue;
+                        // 더 작은(안쪽) 요소로 계속 교체
+                        if (!rgBox || rgBox.contains(el)) rgBox = el;
                     }
-                    // 팝업 내 확인 버튼 클릭
-                    for (const btn of document.querySelectorAll('button')) {
-                        if (!btn.offsetParent) continue;
-                        const t = btn.textContent.trim();
-                        if (t === '확인' || t === '닫기') {
-                            let p = btn.parentElement;
-                            for (let d = 0; d < 10 && p && p !== document.body; d++) {
-                                if (p.textContent.includes('로켓그로스')) {
-                                    btn.click();
-                                    return sel ? '판매자배송 선택 후 확인' : '확인만 클릭';
-                                }
-                                p = p.parentElement;
+                    if (!rgBox) return null;
+
+                    // 2) 팝업 안 판매자배송 label 좌표
+                    let selCoord = null;
+                    for (const lbl of rgBox.querySelectorAll('label')) {
+                        if (!lbl.offsetParent) continue;
+                        if ((lbl.textContent || '').includes('판매자배송')) {
+                            const r = lbl.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0)
+                                selCoord = { x: r.left + r.width/2, y: r.top + r.height/2 };
+                            break;
+                        }
+                    }
+                    // label 없으면 radio input 자체
+                    if (!selCoord) {
+                        for (const inp of rgBox.querySelectorAll('input[type="radio"]')) {
+                            if (!inp.offsetParent) continue;
+                            const lbl2 = inp.closest('label') || inp.parentElement;
+                            if (lbl2 && (lbl2.textContent || '').includes('판매자배송')) {
+                                const r = inp.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0)
+                                    selCoord = { x: r.left + r.width/2, y: r.top + r.height/2 };
+                                break;
                             }
                         }
                     }
-                    return sel ? '판매자배송만 선택' : 'popup_found_no_btn';
+
+                    // 3) 팝업 안 확인/닫기 버튼 좌표 (isFixed 체크 제거 — 팝업 자체가 fixed여도 OK)
+                    let cfmCoord = null;
+                    for (const btn of rgBox.querySelectorAll('button')) {
+                        if (!btn.offsetParent) continue;
+                        const t = btn.textContent.trim();
+                        if (t !== '확인' && t !== '닫기') continue;
+                        const r = btn.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0) {
+                            cfmCoord = { x: r.left + r.width/2, y: r.top + r.height/2 };
+                            break;
+                        }
+                    }
+
+                    return { selCoord, cfmCoord,
+                             debug: (rgBox.textContent||'').replace(/\s+/g,' ').substring(0,60) };
                 }
-            """)
+            """
+            _rg_coords = await pg.evaluate(_JS_RG_COORDS)
+            if _rg_coords:
+                if _rg_coords.get('selCoord'):
+                    await pg.mouse.click(_rg_coords['selCoord']['x'], _rg_coords['selCoord']['y'])
+                    await asyncio.sleep(0.6)  # Vue 상태 업데이트 대기
+                if _rg_coords.get('cfmCoord'):
+                    await pg.mouse.click(_rg_coords['cfmCoord']['x'], _rg_coords['cfmCoord']['y'])
+                    await asyncio.sleep(0.3)
+                _rg_result = '판매자배송(mouse) 선택 후 확인' if _rg_coords.get('cfmCoord') else '판매자배송(mouse) 선택'
+            else:
+                _rg_result = 'no_popup'
             if _rg_result != 'no_popup':
                 log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 처리: {_rg_result} ({inv_id})")
                 await asyncio.sleep(1)
@@ -2543,44 +2586,42 @@ class WingAutomator:
                 # ─ JS: 로켓그로스 팝업 전용 처리 ──────────────────────────
                 # 상품등록 클릭 후 뜨는 "판매 방식 선택" 팝업 (에러가 아님!).
                 # 판매자배송 선택 후 확인 클릭 → 판매방식 저장. 그 후 상품등록 재클릭 필요.
-                _JS_HANDLE_RG_POPUP = """
+                # RG 팝업 처리: Phase1(라디오 선택) / Phase2(확인 클릭) 분리
+                # label.click() 사용 — 브라우저 native 이벤트로 Vue 상태 갱신
+                _JS_RG_DETECT_SEL = """
                     () => {
-                        for (const confirmBtn of document.querySelectorAll('button')) {
-                            if (!confirmBtn.offsetParent) continue;
-                            const bt = confirmBtn.textContent.trim();
-                            if (bt !== '확인' && bt !== '닫기') continue;
-                            let p = confirmBtn.parentElement;
+                        const body = document.body.innerText || '';
+                        if (!body.includes('로켓그로스') ||
+                            (!body.includes('판매방식') && !body.includes('판매 방식')))
+                            return '';
+                        for (const lbl of document.querySelectorAll('label')) {
+                            if (!lbl.offsetParent) continue;
+                            if (lbl.textContent.includes('판매자배송')) { lbl.click(); return 'sel_label'; }
+                        }
+                        for (const inp of document.querySelectorAll('input[type="radio"]')) {
+                            if (!inp.offsetParent) continue;
+                            const lbl = inp.closest('label');
+                            if (lbl && lbl.textContent.includes('판매자배송')) { lbl.click(); return 'sel_label'; }
+                            const par = inp.parentElement;
+                            if (par && par.textContent.includes('판매자배송')) {
+                                inp.click(); inp.dispatchEvent(new Event('change',{bubbles:true}));
+                                return 'sel_inp';
+                            }
+                        }
+                        return 'found_no_sel';
+                    }
+                """
+                _JS_RG_CONFIRM_CLICK = """
+                    () => {
+                        for (const btn of document.querySelectorAll('button')) {
+                            if (!btn.offsetParent) continue;
+                            const t = btn.textContent.trim();
+                            if (t !== '확인' && t !== '닫기') continue;
+                            let p = btn.parentElement;
                             for (let d = 0; d < 10 && p && p !== document.body; d++) {
-                                const pt = p.textContent;
-                                if (pt.includes('로켓그로스') &&
-                                    (pt.includes('판매방식') || pt.includes('판매 방식'))) {
-                                    /* 판매자배송 선택: radio input 먼저 시도 */
-                                    let selected = false;
-                                    for (const inp of p.querySelectorAll('input[type="radio"]')) {
-                                        const lbl = inp.closest('label') || inp.parentElement;
-                                        if (lbl && lbl.textContent.includes('판매자배송')) {
-                                            inp.click(); selected = true; break;
-                                        }
-                                    }
-                                    if (!selected) {
-                                        /* TreeWalker로 정확한 텍스트 노드 "판매자배송" 탐색 */
-                                        const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
-                                        let node;
-                                        while ((node = walker.nextNode())) {
-                                            if (node.textContent.trim() === '판매자배송') {
-                                                const el = node.parentElement;
-                                                if (el && el.offsetParent) { el.click(); selected = true; break; }
-                                            }
-                                        }
-                                    }
-                                    if (!selected) {
-                                        /* Fallback: visible leaf element with 판매자배송 text */
-                                        for (const el of p.querySelectorAll('button, label, span, div')) {
-                                            if (!el.offsetParent || el.children.length > 2) continue;
-                                            if (el.textContent.trim() === '판매자배송') { el.click(); selected = true; break; }
-                                        }
-                                    }
-                                    confirmBtn.click();
+                                if (p.textContent.includes('로켓그로스') &&
+                                    (p.textContent.includes('판매방식') || p.textContent.includes('판매 방식'))) {
+                                    btn.click();
                                     return p.textContent.replace(/\s+/g,' ').trim().substring(0, 80);
                                 }
                                 p = p.parentElement;
@@ -2705,10 +2746,16 @@ class WingAutomator:
                 for _pw in range(15):   # 0.3s × 15 = 4.5초
                     await asyncio.sleep(0.3)
                     # ① 로켓그로스 판매방식 선택 팝업 전용 처리 (에러 아님)
-                    _rg = await pg.evaluate(_JS_HANDLE_RG_POPUP)
-                    if _rg:
+                    _rg_c = await pg.evaluate(_JS_RG_COORDS)
+                    if _rg_c:
+                        if _rg_c.get('selCoord'):
+                            await pg.mouse.click(_rg_c['selCoord']['x'], _rg_c['selCoord']['y'])
+                            await asyncio.sleep(0.6)
+                        if _rg_c.get('cfmCoord'):
+                            await pg.mouse.click(_rg_c['cfmCoord']['x'], _rg_c['cfmCoord']['y'])
+                            await asyncio.sleep(0.3)
                         _rg_count += 1
-                        log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 처리 (판매자배송+확인) — 상품등록 재시도 예정 ({inv_id})")
+                        log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 처리(mouse) — 상품등록 재시도 예정 ({inv_id})")
                         break
                     # ② 에러 팝업 (로켓그로스 제외)
                     _dismissed = await pg.evaluate(_JS_DISMISS_ERR)
@@ -2769,11 +2816,17 @@ class WingAutomator:
                     _rg_count = 0  # 이번 재시도에서 RG 팝업이 재등장하는지 감시
                     for _rw2 in range(15):   # 0.3s × 15 = 4.5초
                         await asyncio.sleep(0.3)
-                        _rg2 = await pg.evaluate(_JS_HANDLE_RG_POPUP)
-                        if _rg2:
+                        _rg2_c = await pg.evaluate(_JS_RG_COORDS)
+                        if _rg2_c:
+                            if _rg2_c.get('selCoord'):
+                                await pg.mouse.click(_rg2_c['selCoord']['x'], _rg2_c['selCoord']['y'])
+                                await asyncio.sleep(0.6)
+                            if _rg2_c.get('cfmCoord'):
+                                await pg.mouse.click(_rg2_c['cfmCoord']['x'], _rg2_c['cfmCoord']['y'])
+                                await asyncio.sleep(0.3)
                             _rg_count += 1
-                            log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 재등장 — 처리 완료 (시도 {_rg_retry+1})")
-                            break  # for _rw2 종료 → for _rg_retry 재진입
+                            log(f"[Wing 판매요청] ℹ️ 로켓그로스 팝업 재등장 처리(mouse) (시도 {_rg_retry+1})")
+                            break
                         _e3 = await pg.evaluate(_JS_DISMISS_ERR)
                         if _e3:
                             log(f"[Wing 판매요청] ❌ 재시도 중 에러 팝업 ({inv_id}): {_e3}")

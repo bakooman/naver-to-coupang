@@ -4076,6 +4076,9 @@ def _naver_to_wing_l1(naver_cat: str) -> str | None:
         "뷰티": "뷰티", "헬스/뷰티": "뷰티", "화장품": "뷰티",
         "스포츠/레져": "스포츠/레져", "스포츠": "스포츠/레져", "레져": "스포츠/레져",
         "가전/디지털": "가전/디지털", "가전": "가전/디지털", "디지털": "가전/디지털",
+        "디지털/가전": "가전/디지털", "PC/게임/SW": "가전/디지털", "게임/SW": "가전/디지털",
+        "게임": "가전/디지털", "게임기": "가전/디지털", "게임 소프트웨어": "가전/디지털",
+        "콘솔": "가전/디지털",  # 게임 콘솔 (가구 화장대/콘솔 아님)
         "반려/애완용품": "반려/애완용품", "반려동물": "반려/애완용품", "반려": "반려/애완용품",
         "자동차용품": "자동차용품", "자동차": "자동차용품",
         "생활용품": "생활용품",
@@ -4295,6 +4298,20 @@ html, body {
   background: linear-gradient(135deg, #ea580c, #f59e0b) !important;
   background-color: #ea580c !important;
   box-shadow: 0 0 14px rgba(234,88,12,0.5) !important;
+}
+/* 가격수정 — 핑크/로즈 계열 */
+.topbar .q-btn.nav-btn-pricefix:not(.active):hover,
+.topbar .q-btn.nav-btn-pricefix:not(.active):hover:before {
+  background: rgba(244,63,94,0.15) !important;
+  background-color: rgba(244,63,94,0.15) !important;
+  border-color: rgba(244,63,94,0.4) !important;
+}
+.topbar .q-btn.nav-btn-pricefix:not(.active):hover .q-btn__content { color: #fb7185 !important; }
+.topbar .q-btn.nav-btn-pricefix.active,
+.topbar .q-btn.nav-btn-pricefix.active:before {
+  background: linear-gradient(135deg, #e11d48, #be123c) !important;
+  background-color: #e11d48 !important;
+  box-shadow: 0 0 14px rgba(225,29,72,0.5) !important;
 }
 /* 엑셀수정 — 초록 계열 */
 .topbar .q-btn.nav-btn-excel:not(.active):hover,
@@ -4646,6 +4663,9 @@ def _make_nav_header(current: str):
         if sold_n:   alert_label += f" 品{sold_n}"
         if restocked_n: alert_label += f" 🟢{restocked_n}"
         ui.button(alert_label, on_click=lambda: ui.navigate.to("/monitor")).classes(mon_cls)
+
+        pf_cls = "nav-btn nav-btn-pricefix active" if current == "price-fix" else "nav-btn nav-btn-pricefix"
+        ui.button("💰 가격수정", on_click=lambda: ui.navigate.to("/price-fix")).classes(pf_cls)
 
         ui.html('<div class="nav-spacer"></div>')
 
@@ -5465,17 +5485,21 @@ def _build_detail_page_tab(settings) -> None:
         _check_long_image(path)
         return True
 
-    def _handle_file_upload(e):
+    async def _handle_file_upload(e):
         try:
-            suffix = _Path(e.name).suffix.lower() or ".jpg"
+            _fname = getattr(e.file, "name", None) or getattr(e, "name", "upload.jpg") if hasattr(e, "file") and e.file is not None else getattr(e, "name", "upload.jpg")
+            suffix = _Path(_fname).suffix.lower() or ".jpg"
             tmp    = _tempfile.NamedTemporaryFile(
                 delete=False, suffix=suffix, dir=str(_IMG_DIR)
             )
-            tmp.write(e.content.read())
+            if hasattr(e, "file") and e.file is not None:
+                tmp.write(await e.file.read())
+            else:
+                tmp.write(e.content.read())
             tmp.close()
-            if _add_image_path(tmp.name, e.name):
+            if _add_image_path(tmp.name, _fname):
                 _refresh_thumbs()
-                ui.notify(f"업로드: {e.name}", type="positive", timeout=1500)
+                ui.notify(f"업로드: {_fname}", type="positive", timeout=1500)
         except Exception as ex:
             ui.notify(f"업로드 실패: {ex}", type="negative", timeout=3000)
 
@@ -6044,11 +6068,15 @@ async def page_error_fix() -> None:
 
                     async def _on_upload(e):
                         import tempfile as _tf
-                        suffix = Path(e.name).suffix.lower() or ".xlsx"
+                        _fname = getattr(e.file, "name", None) or getattr(e, "name", "upload")
+                        suffix = Path(_fname).suffix.lower() or ".xlsx"
                         tmp = _tf.NamedTemporaryFile(
                             delete=False, suffix=suffix, dir=str(_OUTPUT_ROOT)
                         )
-                        tmp.write(e.content.read())
+                        if hasattr(e, "file") and e.file is not None:
+                            tmp.write(await e.file.read())
+                        else:
+                            tmp.write(e.content.read())
                         tmp.close()
                         src_path = Path(tmp.name)
                         try:
@@ -6062,12 +6090,12 @@ async def page_error_fix() -> None:
                                 header_row=header_row, products=products,
                                 fix_results=[],
                             )
-                            file_label.set_text(f"✅ {e.name} — {len(products)}개 고유 상품 감지")
-                            file_label.classes(remove="text-slate-400 text-red-500")
+                            file_label.set_text(f"✅ {_fname} — {len(products)}개 고유 상품 감지")
+                            file_label.classes(remove="text-slate-400 text-red-500 text-orange-500")
                             file_label.classes(add="text-green-600 font-semibold")
                         except Exception as ex:
                             file_label.set_text(f"❌ 파싱 실패: {ex}")
-                            file_label.classes(remove="text-slate-400 text-green-600")
+                            file_label.classes(remove="text-slate-400 text-green-600 text-orange-500")
                             file_label.classes(add="text-red-500")
                             _st.pop("src_path", None)
                         results_area.clear()
@@ -10202,6 +10230,249 @@ async def _on_startup():
                 print(f"[TG-폴링] 루프 오류 (무시): {ex}")
 
     asyncio.create_task(_telegram_register_poll())
+
+
+# ── 가격수정 페이지 ──────────────────────────────────────────────
+
+@ui.page("/price-fix")
+def page_price_fix() -> None:
+    import re as _re
+    import io as _io
+    import openpyxl as _opxl
+    import tempfile as _tf2
+    from pathlib import Path as _Path2
+
+    _add_common_head()
+
+    # 업로드된 엑셀 데이터 (행 단위)
+    _rows: list[dict] = []        # [{name, option, qty, cur_price, alert, new_price, matched}]
+    _raw_wb = None                # openpyxl workbook
+    _fname_holder = {"v": ""}
+
+    with ui.element("div").props("id=page-wrap"):
+        _make_nav_header("price-fix")
+        ui.separator()
+
+        ui.label("가격수정").classes("text-2xl font-bold text-slate-800 mb-1")
+        ui.label(
+            "쿠팡 WING에서 다운받은 엑셀을 업로드하면 가격변동알림에 맞게 가격을 자동 계산해 수정 엑셀을 생성합니다."
+        ).classes("text-sm text-slate-500 mb-4")
+
+        # ── 업로드 카드 ──────────────────────────────────────────
+        with ui.card().classes("shadow-sm w-full mb-4"):
+            with ui.card_section():
+                ui.label("① WING 엑셀 업로드").classes("font-bold text-slate-700 mb-2")
+                ui.label(
+                    "쿠팡 WING → 상품관리 → 가격/재고/판매상태 → 엑셀 다운로드 후 업로드"
+                ).classes("text-xs text-slate-400 mb-3")
+
+                file_lbl = ui.label("파일을 선택하세요").classes("text-sm text-slate-400 mb-2")
+
+                result_area = ui.column().classes("w-full")
+
+        # ── 다운로드 버튼 (처음엔 숨김) ──────────────────────────
+        dl_row = ui.row().classes("w-full items-center gap-3 mt-2")
+        dl_btn = None
+
+        def _qty_from_option(opt: str) -> int:
+            m = _re.search(r'(\d+)개', str(opt))
+            return int(m.group(1)) if m else 1
+
+        def _normalize(s: str) -> str:
+            return _re.sub(r'\s+', ' ', str(s).lower().strip())
+
+        def _token_overlap(a: str, b: str) -> float:
+            ta = set(_normalize(a).split())
+            tb = set(_normalize(b).split())
+            if not ta or not tb:
+                return 0.0
+            return len(ta & tb) / min(len(ta), len(tb))
+
+        def _match_alert(excel_name: str, option_name: str):
+            """가격변동알림에서 매칭되는 항목 반환 (없으면 None)."""
+            alerts = [w for w in _pc.all_watches() if w.status in ("risen", "fallen")]
+            best, best_score = None, 0.0
+            for w in alerts:
+                score = _token_overlap(w.name or "", excel_name)
+                if score > best_score:
+                    best_score = score
+                    best = w
+            return (best, best_score) if best_score >= 0.45 else (None, 0.0)
+
+        async def _on_upload(e):
+            nonlocal _raw_wb, dl_btn
+
+            _fname = getattr(e.file, "name", None) or getattr(e, "name", "upload.xlsx")
+            _fname_holder["v"] = _fname
+
+            suffix = _Path2(_fname).suffix.lower() or ".xlsx"
+            tmp = _tf2.NamedTemporaryFile(delete=False, suffix=suffix)
+            if hasattr(e, "file") and e.file is not None:
+                tmp.write(await e.file.read())
+            else:
+                tmp.write(e.content.read())
+            tmp.close()
+
+            try:
+                import pandas as _pd
+                df = _pd.read_excel(tmp.name, header=None, sheet_name="data")
+            except Exception as ex:
+                file_lbl.set_text(f"❌ 파싱 실패: {ex}")
+                file_lbl.classes(remove="text-slate-400 text-green-600", add="text-red-500")
+                return
+
+            # 헤더는 row 2 (0-indexed), 데이터는 row 3+
+            # 컬럼: 0=업체상품ID, 6=쿠팡노출명, 7=업체등록명, 8=옵션명, 9=판매가격
+            _rows.clear()
+            _raw_wb = _opxl.load_workbook(tmp.name)
+
+            matched_cnt = 0
+            data_rows = df.iloc[3:].reset_index(drop=True)
+            for _, row in data_rows.iterrows():
+                excel_name = str(row.iloc[7]) if not _pd.isna(row.iloc[7]) else str(row.iloc[6])
+                option_name = str(row.iloc[8]) if not _pd.isna(row.iloc[8]) else ""
+                try:
+                    cur_price = int(float(str(row.iloc[9])))
+                except Exception:
+                    cur_price = 0
+
+                qty = _qty_from_option(option_name)
+                alert, score = _match_alert(excel_name, option_name)
+
+                if alert and cur_price > 0:
+                    new_price = cur_price + alert.change * qty
+                    if new_price < 1000:
+                        new_price = 1000  # 최소 1,000원
+                    matched_cnt += 1
+                else:
+                    new_price = None
+
+                _rows.append({
+                    "excel_name":  excel_name,
+                    "option":      option_name,
+                    "qty":         qty,
+                    "cur_price":   cur_price,
+                    "alert":       alert,
+                    "score":       score,
+                    "new_price":   new_price,
+                    "matched":     alert is not None and cur_price > 0,
+                })
+
+            file_lbl.set_text(f"✅ {_fname} — {len(_rows)}행 / 매칭 {matched_cnt}개")
+            file_lbl.classes(remove="text-slate-400 text-red-500", add="text-green-600 font-semibold")
+
+            _render_table()
+
+            # 다운로드 버튼
+            nonlocal dl_btn
+            dl_row.clear()
+            with dl_row:
+                dl_btn = ui.button(
+                    f"📥 수정 엑셀 다운로드 ({matched_cnt}개 가격 변경)",
+                    on_click=_download_excel,
+                ).classes("bg-rose-600 text-white font-bold px-6 py-2 rounded-lg")
+
+        def _render_table():
+            result_area.clear()
+            with result_area:
+                if not _rows:
+                    ui.label("데이터 없음").classes("text-slate-400 text-sm")
+                    return
+
+                # 요약
+                matched = [r for r in _rows if r["matched"]]
+                unmatched = [r for r in _rows if not r["matched"]]
+                with ui.row().classes("gap-4 mb-3 flex-wrap"):
+                    ui.label(f"✅ 매칭: {len(matched)}개").classes("text-green-600 font-bold text-sm")
+                    ui.label(f"⚪ 미매칭(변동없음): {len(unmatched)}개").classes("text-slate-400 text-sm")
+
+                # 테이블
+                with ui.element("div").classes("w-full overflow-x-auto"):
+                    with ui.element("table").classes("w-full text-sm border-collapse"):
+                        with ui.element("thead"):
+                            with ui.element("tr").classes("bg-slate-100 text-slate-600"):
+                                for col in ["상품명", "옵션", "수량", "현재가격", "변동(단가)", "새 가격", "상태"]:
+                                    ui.element("th").classes("px-3 py-2 text-left border-b border-slate-200 whitespace-nowrap").text = col
+                        with ui.element("tbody"):
+                            prev_name = ""
+                            for r in _rows:
+                                row_cls = "border-b border-slate-100 "
+                                if r["matched"]:
+                                    row_cls += "bg-green-50 hover:bg-green-100"
+                                else:
+                                    row_cls += "hover:bg-slate-50"
+                                with ui.element("tr").classes(row_cls):
+                                    # 상품명 (같은 상품은 반복 표시 줄임)
+                                    show_name = r["excel_name"] if r["excel_name"] != prev_name else "↳"
+                                    prev_name = r["excel_name"]
+                                    ui.element("td").classes("px-3 py-1.5 text-slate-700 max-w-xs truncate").text = show_name[:40]
+                                    ui.element("td").classes("px-3 py-1.5 text-slate-500").text = r["option"][:20]
+                                    ui.element("td").classes("px-3 py-1.5 text-center text-slate-500").text = str(r["qty"])
+                                    ui.element("td").classes("px-3 py-1.5 text-right font-mono").text = f"{r['cur_price']:,}원" if r["cur_price"] else "-"
+                                    if r["alert"]:
+                                        chg = r["alert"].change
+                                        chg_cls = "px-3 py-1.5 text-right font-mono font-bold " + ("text-red-500" if chg > 0 else "text-blue-500")
+                                        ui.element("td").classes(chg_cls).text = f"+{chg:,}" if chg > 0 else f"{chg:,}"
+                                    else:
+                                        ui.element("td").classes("px-3 py-1.5 text-slate-300 text-center").text = "-"
+                                    if r["new_price"]:
+                                        ui.element("td").classes("px-3 py-1.5 text-right font-mono font-bold text-green-700").text = f"{r['new_price']:,}원"
+                                    else:
+                                        ui.element("td").classes("px-3 py-1.5 text-slate-300 text-center").text = "-"
+                                    status = "✅ 매칭" if r["matched"] else "⚪ 유지"
+                                    status_cls = "px-3 py-1.5 text-center text-xs " + ("text-green-600 font-semibold" if r["matched"] else "text-slate-300")
+                                    ui.element("td").classes(status_cls).text = status
+
+        async def _download_excel():
+            if not _raw_wb or not _rows:
+                ui.notify("먼저 엑셀을 업로드하세요.", color="negative")
+                return
+
+            ws = _raw_wb.active
+            # 데이터는 4행(Excel row 4)부터 시작 (row 0=설명, 1=섹션헤더, 2=컬럼헤더, 3+=데이터)
+            # openpyxl은 1-indexed → Excel row 4 = 첫 데이터
+            DATA_START_ROW = 4   # Excel 1-indexed
+            # 판매가격(수정) 컬럼 = P열 (column index 16, 1-indexed)
+            PRICE_COL = 16
+
+            for i, r in enumerate(_rows):
+                if r["matched"] and r["new_price"]:
+                    excel_row = DATA_START_ROW + i
+                    ws.cell(row=excel_row, column=PRICE_COL, value=r["new_price"])
+
+            # 임시 파일로 저장 후 다운로드
+            out_tmp = _tf2.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            out_tmp.close()
+            _raw_wb.save(out_tmp.name)
+
+            orig_stem = _Path2(_fname_holder["v"]).stem
+            dl_name = f"{orig_stem}_가격수정.xlsx"
+
+            with open(out_tmp.name, "rb") as f:
+                data = f.read()
+
+            import base64 as _b64
+            b64 = _b64.b64encode(data).decode()
+            ui.run_javascript(f"""
+                const a = document.createElement('a');
+                a.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}';
+                a.download = '{dl_name}';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            """)
+            ui.notify(f"✅ {dl_name} 다운로드 시작!", color="positive")
+
+        # 업로드 컴포넌트
+        with ui.card().classes("shadow-sm w-full mb-3"):
+            with ui.card_section():
+                ui.upload(
+                    label="Wing 엑셀 파일 (.xlsx)",
+                    on_upload=_on_upload,
+                    auto_upload=True,
+                ).props('accept=".xlsx" flat bordered').classes("w-full")
+
+        dl_row  # 다운로드 버튼 자리
 
 
 @_app.on_shutdown
