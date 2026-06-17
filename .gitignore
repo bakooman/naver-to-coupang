@@ -6,8 +6,10 @@ config/category_auto.json
 ssh_keys/
 data/wing_session*.json
 
-# 대용량/불필요 데이터 파일
-data/
+# 대용량/불필요 데이터 파일 (특정 파일만 예외 추적)
+data/*
+!data/collection_history.json
+!data/queue_state.json
 coupang_data.json
 
 # 백업/임시 파일
