@@ -4468,7 +4468,7 @@ def _make_nav_header(current: str):
     restocked_n = counts["restocked"]
     has_any  = risen_n + fallen_n + sold_n + restocked_n > 0
 
-    async def _restart_app():
+    async def _do_restart_now():
         ui.notify("🔄 앱을 재시작합니다...", type="info", timeout=4000)
         await asyncio.sleep(0.3)
         import os as _os
@@ -4516,6 +4516,20 @@ def _make_nav_header(current: str):
             await asyncio.sleep(0.2)
         await asyncio.sleep(0.2)
         _app.shutdown()
+
+    async def _restart_app():
+        if _global_running["v"]:
+            with ui.dialog() as _dlg, ui.card():
+                ui.label("⚠ 앱 재시작시 상품수집이 초기화 됩니다. 진행하시겠습니까?").classes("text-base font-bold mb-4")
+                with ui.row().classes("gap-2 justify-end w-full"):
+                    ui.button("취소", on_click=_dlg.close).props("flat color=grey")
+                    async def _confirm_restart(d=_dlg):
+                        d.close()
+                        await _do_restart_now()
+                    ui.button("확인", on_click=_confirm_restart).props("color=red")
+            _dlg.open()
+            return
+        await _do_restart_now()
 
     # ── 풀 width 그라디언트 탑바 ────────────────────────────
     with ui.element("div").classes("topbar"):
