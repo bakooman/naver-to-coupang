@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib as _hashlib
 import io
 import json
@@ -382,6 +383,7 @@ class QueueEntry:
     # ── 단일 등록 전용 ────────────────────────────────────────────────
     single_mode:           bool       = False                       # True = 단일 등록 탭에서 추가된 항목
     single_selected_imgs:  list[str]  = field(default_factory=list) # 사용자가 선택한 네이버 상세 이미지 URL 목록
+    r2_failed:             bool       = False                       # True = R2 이미지 업로드 실패 (네이버 원본 URL 폴백)
     margin_override:       float      = 0.0                         # >0 이면 글로벌 마진율 대신 이 값 사용
     watch_store:          str        = "샵케이"  # 가격감시 등록 스토어 구분 ("샵케이" / "제니스 트레이딩")
     price_extra:          int        = 0          # 관부가세 등 추가금액 (원) — 모든 옵션/수량 판매가에 합산
@@ -865,7 +867,7 @@ def _excel_issues(entry: "QueueEntry") -> list[dict]:
             "fixable": False,
         })
 
-    # 5. 이미지 없음
+    # 5. 이미지 없음 / R2 업로드 실패
     if item:
         has_img = bool(item.main_image_url) or any(b.image_url for b in item.bundles)
         if not has_img:
@@ -874,6 +876,13 @@ def _excel_issues(entry: "QueueEntry") -> list[dict]:
                 "msg": "대표 이미지 없음 — Wing 등록 불가",
                 "severity": "critical",
                 "fixable": True,
+            })
+        elif entry.r2_failed:
+            issues.append({
+                "field": "image",
+                "msg": "R2 이미지 업로드 실패 — 네이버 원본 URL 사용 중 (쿠팡 등록 시 이미지 오류 가능)",
+                "severity": "critical",
+                "fixable": False,
             })
 
     # 6. 상세설명 없음 (Wing DF 컬럼 필수)
@@ -2398,14 +2407,21 @@ async def _process_entry(
                         log_(f"[{entry.uid[:6]}] {qty}개 이미지 → {url_result[:60]}...")
                     else:
                         log_(f"[{entry.uid[:6]}] {qty}개 이미지 업로드 실패 → 원본 URL 사용")
+                        entry.r2_failed = True
 
         # 대표이미지 (1개 번들 이미지 or 네이버 원본)
         main_img = bundle_image_urls.get(1) or ""
         if not main_img and product.image_url:
             log_(f"[{entry.uid[:6]}] 원본 이미지 직접 업로드...")
-            main_img = await loop.run_in_executor(
+            _uploaded_main = await loop.run_in_executor(
                 None, lambda: upload_url(product.image_url, f"{product.product_id}_main.jpg")
-            ) or product.image_url
+            )
+            if _uploaded_main:
+                main_img = _uploaded_main
+            else:
+                main_img = product.image_url
+                entry.r2_failed = True
+                log_(f"[{entry.uid[:6]}] ⚠ R2 대표이미지 업로드 실패 → 네이버 원본 URL 폴백")
 
         # ── 3-b. 상세페이지 전용 클린 이미지 생성 및 R2 업로드 ────────
         # 배지(수량 스탬프) 절대 포함 금지 — process_detail() 은 _stamp_label() 미호출
@@ -3853,6 +3869,7 @@ async def _run_global_processing(margin_rate: float, lead_time: int, use_nobg: b
                     _global_timing["item_times"] = _global_timing["item_times"][-15:]
 
             entry.status = "done" if entry.result_item else "error"
+            gc.collect()  # 상품당 메모리 해제 (1GB RAM 환경 대응)
 
         # ── 카테고리 재감지 (detector 최신 파일 반영 + 기존 done 항목 갱신) ──
         try:
