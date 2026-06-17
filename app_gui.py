@@ -10261,6 +10261,7 @@ def page_price_fix() -> None:
             return s
 
         col_letter = _col_letter(price_col)
+        # {ref: price}  예) {"N4": 19840, "N5": 22000, ...}
         targets = {f"{col_letter}{row}": price for row, price in row_price_map.items()}
 
         src = _io2.BytesIO(raw)
@@ -10273,17 +10274,50 @@ def page_price_fix() -> None:
                             and item.filename.endswith(".xml")):
                         text = data.decode("utf-8")
                         for ref, new_price in targets.items():
+                            row_num = int(_re2.sub(r'[A-Z]+', '', ref))
+
+                            # ① 기존 셀 교체 시도
                             def _replacer(m, _p=new_price):
                                 inner = m.group(0)
                                 if "<v>" in inner:
                                     inner = _re2.sub(r"<v>[^<]*</v>", f"<v>{_p}</v>", inner)
                                 else:
                                     inner = inner[:-4] + f"<v>{_p}</v></c>"
+                                # shared-string 타입 제거 (숫자로 덮어쓸 때)
+                                inner = _re2.sub(r'\s*t="[^"]*"', '', inner, count=1)
                                 return inner
+
                             pat = (r'<c\b[^>]*\br="'
                                    + _re2.escape(ref)
                                    + r'"[^>]*>(?:(?!</c>).)*</c>')
-                            text = _re2.sub(pat, _replacer, text, flags=_re2.DOTALL)
+                            new_text = _re2.sub(pat, _replacer, text, flags=_re2.DOTALL)
+
+                            if new_text == text:
+                                # ② 셀이 없음 → 해당 행에 새 셀 삽입
+                                row_pat = (r'(<row\b[^>]*\br="'
+                                           + str(row_num)
+                                           + r'"[^>]*>)((?:(?!</row>).)*)(</row>)')
+                                new_cell = f'<c r="{ref}"><v>{new_price}</v></c>'
+
+                                def _insert(m, _nc=new_cell, _cl=col_letter, _rn=row_num):
+                                    content = m.group(2)
+                                    # 열 순서 유지: 우리 열보다 큰 열 앞에 삽입
+                                    later = _re2.search(
+                                        r'<c\b[^>]*\br="([A-Z]+)' + str(_rn) + r'"', content)
+                                    if later:
+                                        ltr = later.group(1)
+                                        # 알파벳 비교로 삽입 위치 결정
+                                        if ltr > _cl:
+                                            content = content.replace(later.group(0), _nc + later.group(0), 1)
+                                        else:
+                                            content = content + _nc
+                                    else:
+                                        content = content + _nc
+                                    return m.group(1) + content + m.group(3)
+
+                                new_text = _re2.sub(row_pat, _insert, text, flags=_re2.DOTALL)
+
+                            text = new_text
                         data = text.encode("utf-8")
                     zout.writestr(item, data)
         return dst.getvalue()
@@ -10442,15 +10476,24 @@ def page_price_fix() -> None:
 
             # 감지된 컬럼 정보 저장 (download에서 사용)
             _meta["data_start_row"] = _header_row + 2   # openpyxl 1-indexed: header=row3, data=row4
-            _meta["newprice_col"]   = (_col_newprice + 1) if _col_newprice is not None else 16
+            # 수정요청 열 우선, 없으면 현재가 열에 직접 기입 (단일 판매가격 열 구조)
+            if _col_newprice is not None:
+                _meta["newprice_col"] = _col_newprice + 1
+            elif _col_price is not None:
+                _meta["newprice_col"] = _col_price + 1
+            else:
+                _meta["newprice_col"] = 16
 
             # 디버그 알림
             _alerts_cnt = len([w for w in _pc.all_watches() if w.status in ('risen','fallen')])
             _sample_name = str(df.iloc[_data_start].iloc[_col_regname or 7]) if len(df) > _data_start else ''
+            _write_col_0idx = _meta["newprice_col"] - 1  # 0-indexed for display
+            _write_col_hdr  = _hdr[_write_col_0idx] if _write_col_0idx < len(_hdr) else "?"
             ui.notify(
-                f"알림:{_alerts_cnt}개 | 헤더row:{_header_row} | 등록명col:{_col_regname} | "
-                f"가격col:{_col_price} | 수정col:{_col_newprice} | 샘플:{_sample_name[:30]}",
-                timeout=15000, type="info"
+                f"알림:{_alerts_cnt}개 | 헤더row:{_header_row} | 가격col:{_col_price} | "
+                f"수정col:{_col_newprice} | 기입열:{_meta['newprice_col']}({_write_col_hdr}) | "
+                f"샘플:{_sample_name[:25]}",
+                timeout=20000, type="info"
             )
 
             matched_cnt = 0
