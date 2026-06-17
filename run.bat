@@ -117,9 +117,25 @@ echo [4/5] Tunnel UP on port %SOCKS5_PORT%  ^(PID: %SSH_PID%^)
 :no_tunnel
 
 :: -----------------------------------------------------------
+:: [5/5] Cloudflare Tunnel
+:: -----------------------------------------------------------
+echo [5/5a] Cloudflare Tunnel check (port 443) ...
+tasklist /fi "IMAGENAME eq cloudflared.exe" 2>nul | findstr /i "cloudflared.exe" >nul
+if %errorlevel% == 0 (
+    echo [5/5a] cloudflared already running -- skip
+) else (
+    if exist "%ROOT%cloudflared.exe" (
+        start "CF-Tunnel" /min "%ROOT%cloudflared.exe" tunnel run bakoo-tunnel
+        echo [5/5a] Cloudflare Tunnel started
+    ) else (
+        echo [5/5a] WARNING: cloudflared.exe not found -- skipping tunnel
+    )
+)
+
+:: -----------------------------------------------------------
 :: [5/5] Launch GUI
 :: -----------------------------------------------------------
-echo [5/5] Launching GUI ...
+echo [5/5b] Launching GUI ...
 echo.
 "%VENV_PY%" "%ROOT%app_gui.py"
 if errorlevel 1 (
