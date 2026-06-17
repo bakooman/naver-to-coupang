@@ -8292,9 +8292,15 @@ def page() -> None:
                                     f"수동입력 카테고리: {_cat_display_name}" if entry.category_is_manual else
                                     f"카테고리: {_cat_display_name} | {entry.gosisi_cat[:15]}"
                                 )
-                            ui.label(kw_text).classes(
-                                f"text-xs text-{kw_color}-600 font-mono mt-1"
-                            )
+                            with ui.row().classes("items-center gap-2 mt-1 flex-wrap"):
+                                ui.label(kw_text).classes(
+                                    f"text-xs text-{kw_color}-600 font-mono"
+                                )
+                                _brand_disp = (entry.brand or "").strip()
+                                if _brand_disp:
+                                    ui.label(f"브랜드: {_brand_disp}").classes(
+                                        "text-xs text-purple-600 font-mono font-bold"
+                                    )
 
                         # done/error: 세트 상품 차종·제조사 표시
                         _is_set_card = (
