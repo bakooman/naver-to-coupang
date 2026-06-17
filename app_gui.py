@@ -3996,6 +3996,24 @@ async def _run_global_processing(margin_rate: float, lead_time: int, use_nobg: b
             if _e.status == "processing":
                 _e.status = "pending"
         print("[처리] 즉시 중단됨")
+        # 이미 완료된 항목으로 엑셀 생성 (중단 후에도 다운로드 가능하도록)
+        _stop_success = [e.result_item for e in _global_queue if e.result_item]
+        if _stop_success:
+            try:
+                _tmpl_s = _global_template_path.get("v") or ""
+                _builder_s = ExcelBuilder(
+                    template_path=_tmpl_s if _tmpl_s and Path(_tmpl_s).exists() else None,
+                    output_dir=_OUTPUT_ROOT,
+                    category_id="",
+                )
+                _loop_s = asyncio.get_running_loop()
+                _out_s = await _loop_s.run_in_executor(
+                    None, lambda: _builder_s.build(_stop_success)
+                )
+                _global_output_file["v"] = _out_s.name
+                print(f"[중단] ✅ 완료 {len(_stop_success)}개 엑셀 저장: {_out_s}")
+            except Exception as _se:
+                print(f"[중단] 엑셀 저장 실패: {_se}")
     except Exception as exc:
         print(f"[처리] 오류: {exc}")
         print(traceback.format_exc())
