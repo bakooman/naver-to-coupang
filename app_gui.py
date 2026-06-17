@@ -9975,7 +9975,7 @@ def page() -> None:
                         log_cb=_log_cb,
                         progress_cb=_progress_cb,
                         product_data=_product_data,
-                        headless=True,
+                        headless=False,
                         gemini_api_key=getattr(_settings, "GEMINI_API_KEY", ""),
                     ),
                 )
@@ -10189,7 +10189,7 @@ async def _on_startup():
                             log_cb=lambda msg: print(f"[Wing-TG] {msg}"),
                             progress_cb=None,
                             product_data=product_data,
-                            headless=True,
+                            headless=False,
                             gemini_api_key=getattr(_settings, "GEMINI_API_KEY", ""),
                         ),
                     )
@@ -10248,6 +10248,7 @@ def page_price_fix() -> None:
     _rows: list[dict] = []        # [{name, option, qty, cur_price, alert, new_price, matched}]
     _raw_wb = None                # openpyxl workbook
     _fname_holder = {"v": ""}
+    _meta = {"data_start_row": 4, "newprice_col": 16}  # Excel 1-indexed
 
     with ui.element("div").props("id=page-wrap"):
         _make_nav_header("price-fix")
@@ -10288,16 +10289,44 @@ def page_price_fix() -> None:
                 return 0.0
             return len(ta & tb) / min(len(ta), len(tb))
 
+        # 공백 제거 + 브랜드 공통 문자열 제거 → 핵심 식별 키
+        _STOP_PAT = _re.compile(r'bbw|배쓰앤바디웍스|배스앤바디웍스|배스앤바디|바디웍스|배스앤')
+
+        def _key(name: str) -> str:
+            """공백 완전 제거 + 브랜드 공통 문자열 제거 → 핵심 식별 문자열.
+            이렇게 하면 '유아더원' = '유아 더 원', '바디크림' = '바디 크림' 등이 동일해짐."""
+            s = _re.sub(r'\s+', '', name.lower())
+            return _STOP_PAT.sub('', s)
+
         def _match_alert(excel_name: str, option_name: str):
-            """가격변동알림에서 매칭되는 항목 반환 (없으면 None)."""
+            """가격변동알림 매칭 — 공백무시 핵심 문자열 비교."""
             alerts = [w for w in _pc.all_watches() if w.status in ("risen", "fallen")]
+            ex_key = _key(excel_name)
+            if not ex_key:
+                return (None, 0.0)
+            ex_sorted = sorted(ex_key)   # 어순 무관 비교용
+
             best, best_score = None, 0.0
             for w in alerts:
-                score = _token_overlap(w.name or "", excel_name)
+                al_key = _key(w.name or "")
+                if not al_key:
+                    continue
+                if al_key == ex_key:
+                    score = 1.0
+                elif sorted(al_key) == ex_sorted:
+                    # 동일 문자 다른 어순 (예: '바디로션로즈' vs '로즈바디로션')
+                    score = 0.95
+                elif al_key in ex_key:
+                    # 알림명이 엑셀명의 부분집합 (긴 엑셀명 대비 짧은 알림명)
+                    score = len(al_key) / len(ex_key)
+                elif ex_key in al_key:
+                    score = len(ex_key) / len(al_key)
+                else:
+                    score = 0.0
                 if score > best_score:
                     best_score = score
                     best = w
-            return (best, best_score) if best_score >= 0.45 else (None, 0.0)
+            return (best, best_score) if best_score >= 0.80 else (None, 0.0)
 
         async def _on_upload(e):
             nonlocal _raw_wb, dl_btn
@@ -10326,13 +10355,64 @@ def page_price_fix() -> None:
             _rows.clear()
             _raw_wb = _opxl.load_workbook(tmp.name)
 
+            # 헤더 행 탐지: 셀 값이 짧고 정확히 '업체상품 ID' / 'Product ID' 인 행
+            # (row0 설명 텍스트는 수천 자 → 길이 제한으로 제외)
+            _header_row = 2  # 기본값 (Wing 엑셀 표준)
+            _EXACT_HEADERS = {'업체상품 ID', '업체상품ID', 'Product ID', '옵션 ID', 'Option ID'}
+            for _ri in range(min(6, len(df))):
+                _short_vals = {str(v).strip() for v in df.iloc[_ri].tolist()
+                               if str(v) not in ('nan','None','') and len(str(v)) < 40}
+                if _short_vals & _EXACT_HEADERS:
+                    _header_row = _ri
+                    break
+            _data_start = _header_row + 1
+
+            # 컬럼 인덱스 헤더로부터 자동 감지
+            _hdr = [str(v) for v in df.iloc[_header_row].tolist()]
+            def _col(candidates):
+                for c in candidates:
+                    for i, h in enumerate(_hdr):
+                        if c in h:
+                            return i
+                return None
+            _col_regname  = _col(['업체 등록 상품명', '등록 상품명'])
+            _col_expname  = _col(['쿠팡 노출 상품명', '노출 상품명'])
+            _col_optname  = _col(['등록 옵션명', '옵션명'])
+            _col_price    = _col(['판매가격'])
+            # 수정요청 열: 두 번째 '판매가격' (첫번째는 현재가, 두번째는 수정요청)
+            _col_newprice = None
+            _found_first  = False
+            for _i, _h in enumerate(_hdr):
+                if '판매가격' in _h:
+                    if _found_first:
+                        _col_newprice = _i
+                        break
+                    _found_first = True
+
+            # 감지된 컬럼 정보 저장 (download에서 사용)
+            _meta["data_start_row"] = _header_row + 2   # openpyxl 1-indexed: header=row3, data=row4
+            _meta["newprice_col"]   = (_col_newprice + 1) if _col_newprice is not None else 16
+
+            # 디버그 알림
+            _alerts_cnt = len([w for w in _pc.all_watches() if w.status in ('risen','fallen')])
+            _sample_name = str(df.iloc[_data_start].iloc[_col_regname or 7]) if len(df) > _data_start else ''
+            ui.notify(
+                f"알림:{_alerts_cnt}개 | 헤더row:{_header_row} | 등록명col:{_col_regname} | "
+                f"가격col:{_col_price} | 수정col:{_col_newprice} | 샘플:{_sample_name[:30]}",
+                timeout=15000, type="info"
+            )
+
             matched_cnt = 0
-            data_rows = df.iloc[3:].reset_index(drop=True)
+            data_rows = df.iloc[_data_start:].reset_index(drop=True)
             for _, row in data_rows.iterrows():
-                excel_name = str(row.iloc[7]) if not _pd.isna(row.iloc[7]) else str(row.iloc[6])
-                option_name = str(row.iloc[8]) if not _pd.isna(row.iloc[8]) else ""
+                _rn  = _col_regname  if _col_regname  is not None else 7
+                _en  = _col_expname  if _col_expname  is not None else 6
+                _on  = _col_optname  if _col_optname  is not None else 8
+                _pn  = _col_price    if _col_price     is not None else 9
+                excel_name = str(row.iloc[_rn]) if not _pd.isna(row.iloc[_rn]) else str(row.iloc[_en])
+                option_name = str(row.iloc[_on]) if not _pd.isna(row.iloc[_on]) else ""
                 try:
-                    cur_price = int(float(str(row.iloc[9])))
+                    cur_price = int(float(str(row.iloc[_pn])))
                 except Exception:
                     cur_price = 0
 
@@ -10429,11 +10509,8 @@ def page_price_fix() -> None:
                 return
 
             ws = _raw_wb.active
-            # 데이터는 4행(Excel row 4)부터 시작 (row 0=설명, 1=섹션헤더, 2=컬럼헤더, 3+=데이터)
-            # openpyxl은 1-indexed → Excel row 4 = 첫 데이터
-            DATA_START_ROW = 4   # Excel 1-indexed
-            # 판매가격(수정) 컬럼 = P열 (column index 16, 1-indexed)
-            PRICE_COL = 16
+            DATA_START_ROW = _meta["data_start_row"]
+            PRICE_COL      = _meta["newprice_col"]
 
             for i, r in enumerate(_rows):
                 if r["matched"] and r["new_price"]:

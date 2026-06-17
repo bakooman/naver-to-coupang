@@ -2162,61 +2162,6 @@ class WingAutomator:
                 _gtin = _pdata.get("gtin", "") if _pdata else ""
                 _model_number = ""  # 품번/모델번호 (Gemini 검색 결과)
 
-                # ── GTIN 없을 때 Gemini 폴백 (Google Search 그라운딩) ──────────
-                if not _gtin and gemini_api_key and prod_name:
-                    try:
-                        # Wing 페이지에서 브랜드/제조사 추출 → 검색 정확도 향상
-                        _brand_on_page: str = await pg.evaluate("""
-                            () => {
-                                const selectors = [
-                                    'input[name*="brand"]', 'input[placeholder*="브랜드"]',
-                                    'input[placeholder*="제조사"]', 'input[name*="manufacturer"]',
-                                ];
-                                for (const sel of selectors) {
-                                    const el = document.querySelector(sel);
-                                    if (el && el.value && el.value.trim().length > 1)
-                                        return el.value.trim();
-                                }
-                                for (const kw of ['브랜드', '제조사', '브랜드명']) {
-                                    for (const el of document.querySelectorAll('td, th, label, span')) {
-                                        if (el.textContent.trim() === kw) {
-                                            const sib = el.nextElementSibling;
-                                            const inp = sib ? sib.querySelector('input') || sib : null;
-                                            const val = inp ? (inp.value || inp.textContent || '').trim() : '';
-                                            if (val && val.length > 1 && val.length < 60) return val;
-                                        }
-                                    }
-                                }
-                                return '';
-                            }
-                        """) or ""
-                        _search_ctx = f"{_brand_on_page} {prod_name}".strip() if _brand_on_page else prod_name
-
-                        from google import genai as _genai
-                        from google.genai import types as _gtypes
-                        _gclient = _genai.Client(api_key=gemini_api_key)
-                        _g_resp = _gclient.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=(
-                                f"상품명: {_search_ctx}\n"
-                                "Google 검색을 통해 이 상품의 UPC, EAN, 또는 GTIN 바코드 번호를 찾아주세요. "
-                                "바코드 숫자만 반환하세요 (8~14자리). 찾을 수 없으면 빈 문자열만 반환하세요."
-                            ),
-                            config=_gtypes.GenerateContentConfig(
-                                tools=[_gtypes.Tool(google_search=_gtypes.GoogleSearch())]
-                            ),
-                        )
-                        _g_text = (_g_resp.text or "").strip()
-                        import re as _re_bc
-                        _bc_match = _re_bc.search(r'(?<!\d)(\d{8,14})(?!\d)', _g_text)
-                        if _bc_match:
-                            _gtin = _bc_match.group(1)
-                            log(f"[Wing 판매요청] 🤖 Gemini 바코드 폴백: {_gtin}")
-                        else:
-                            log(f"[Wing 판매요청] ℹ️ Gemini 바코드 폴백 결과 없음")
-                    except Exception as _ge:
-                        log(f"[Wing 판매요청] ⚠️ Gemini 바코드 폴백 실패: {_ge}")
-
                 # ── 품번/모델번호 필요 여부 탐지 → Gemini 검색 ────────────────
                 if gemini_api_key and prod_name:
                     try:
