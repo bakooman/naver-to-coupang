@@ -6038,7 +6038,7 @@ async def page_error_fix() -> None:
             with ui.card().classes("shadow-sm w-full mb-4"):
                 with ui.card_section():
                     ui.label("① 파일 업로드").classes("font-bold text-slate-700 text-sm mb-2")
-                    file_label = ui.label("파일을 선택 후 '업로드' 버튼을 누르세요").classes("text-xs text-slate-400 mb-2 block")
+                    file_label = ui.label("⚠️ 파일이 서버에 없습니다 — 아래에서 파일을 선택하면 자동 업로드됩니다").classes("text-xs text-orange-500 font-semibold mb-2 block")
 
                     _upload_ref: dict = {"el": None}
 
@@ -6070,9 +6070,6 @@ async def page_error_fix() -> None:
                             file_label.classes(remove="text-slate-400 text-green-600")
                             file_label.classes(add="text-red-500")
                             _st.pop("src_path", None)
-                        # 업로드 컴포넌트 리셋 → 같은 파일 다시 선택 가능
-                        if _upload_ref["el"]:
-                            _upload_ref["el"].reset()
                         results_area.clear()
                         dl_btn.set_enabled(False)
 
