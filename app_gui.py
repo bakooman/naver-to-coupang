@@ -4459,6 +4459,71 @@ def _add_common_head():
 
 
 
+async def _do_restart_now():
+    ui.notify("🔄 앱을 재시작합니다...", type="info", timeout=4000)
+    await asyncio.sleep(0.3)
+    import os as _os
+    _cwd = str(Path(sys.argv[0]).resolve().parent)
+    if sys.platform == "win32":
+        _bat = str(Path(_cwd) / "run.bat")
+        _my_pid = _os.getpid()
+        _parent_pids: list[str] = []
+        try:
+            _r = subprocess.run(
+                f'wmic process where "ProcessId={_my_pid}" get ParentProcessId /value',
+                shell=True, capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            for _line in _r.stdout.splitlines():
+                _line = _line.strip()
+                if _line.startswith("ParentProcessId="):
+                    _ppid = _line.split("=")[1].strip()
+                    if _ppid.isdigit() and int(_ppid) > 1:
+                        _parent_pids.append(_ppid)
+        except Exception:
+            pass
+        _DETACHED = 0x00000008
+        _NEW_CON  = subprocess.CREATE_NEW_CONSOLE
+        subprocess.Popen(
+            ['cmd', '/c', f'timeout /t 3 /nobreak > nul && call "{_bat}"'],
+            cwd=_cwd, creationflags=_DETACHED | _NEW_CON, close_fds=True,
+        )
+        await ui.run_javascript("window.close()")
+        await asyncio.sleep(0.3)
+        for _ppid in _parent_pids:
+            try:
+                subprocess.run(f"taskkill /PID {_ppid} /F /T", shell=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW, timeout=3)
+            except Exception:
+                pass
+    else:
+        _bat = str(Path(sys.argv[0]).resolve().parent / "run.bat")
+        subprocess.Popen(
+            f'sleep 3 && git -C "{_cwd}" checkout -- config/category_map.json'
+            f' && git -C "{_cwd}" pull --rebase origin main && bash "{_bat}"',
+            shell=True, cwd=_cwd, start_new_session=True,
+        )
+        await ui.run_javascript("window.close()")
+        await asyncio.sleep(0.2)
+    await asyncio.sleep(0.2)
+    _app.shutdown()
+
+
+async def _restart_app():
+    if _global_running["v"]:
+        with ui.dialog() as _dlg, ui.card():
+            ui.label("⚠ 앱 재시작시 상품수집이 초기화 됩니다. 진행하시겠습니까?").classes("text-base font-bold mb-4")
+            with ui.row().classes("gap-2 justify-end w-full"):
+                ui.button("취소", on_click=_dlg.close).props("flat color=grey")
+                async def _confirm_restart(d=_dlg):
+                    d.close()
+                    await _do_restart_now()
+                ui.button("확인", on_click=_confirm_restart).props("color=red")
+        _dlg.open()
+        return
+    await _do_restart_now()
+
+
 def _make_nav_header(current: str):
     """공통 상단 네비게이션 바."""
     counts = _pc.alert_counts()
@@ -4467,69 +4532,6 @@ def _make_nav_header(current: str):
     sold_n      = counts["soldout"]
     restocked_n = counts["restocked"]
     has_any  = risen_n + fallen_n + sold_n + restocked_n > 0
-
-    async def _do_restart_now():
-        ui.notify("🔄 앱을 재시작합니다...", type="info", timeout=4000)
-        await asyncio.sleep(0.3)
-        import os as _os
-        _cwd = str(Path(sys.argv[0]).resolve().parent)
-        if sys.platform == "win32":
-            _bat = str(Path(_cwd) / "run.bat")
-            _my_pid = _os.getpid()
-            _parent_pids: list[str] = []
-            try:
-                _r = subprocess.run(
-                    f'wmic process where "ProcessId={_my_pid}" get ParentProcessId /value',
-                    shell=True, capture_output=True, text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                for _line in _r.stdout.splitlines():
-                    _line = _line.strip()
-                    if _line.startswith("ParentProcessId="):
-                        _ppid = _line.split("=")[1].strip()
-                        if _ppid.isdigit() and int(_ppid) > 1:
-                            _parent_pids.append(_ppid)
-            except Exception:
-                pass
-            _DETACHED = 0x00000008
-            _NEW_CON  = subprocess.CREATE_NEW_CONSOLE
-            subprocess.Popen(
-                ['cmd', '/c', f'timeout /t 3 /nobreak > nul && call "{_bat}"'],
-                cwd=_cwd, creationflags=_DETACHED | _NEW_CON, close_fds=True,
-            )
-            await ui.run_javascript("window.close()")
-            await asyncio.sleep(0.3)
-            for _ppid in _parent_pids:
-                try:
-                    subprocess.run(f"taskkill /PID {_ppid} /F /T", shell=True,
-                        creationflags=subprocess.CREATE_NO_WINDOW, timeout=3)
-                except Exception:
-                    pass
-        else:
-            _bat = str(Path(sys.argv[0]).resolve().parent / "run.bat")
-            subprocess.Popen(
-                f'sleep 3 && git -C "{_cwd}" checkout -- config/category_map.json'
-                f' && git -C "{_cwd}" pull --rebase origin main && bash "{_bat}"',
-                shell=True, cwd=_cwd, start_new_session=True,
-            )
-            await ui.run_javascript("window.close()")
-            await asyncio.sleep(0.2)
-        await asyncio.sleep(0.2)
-        _app.shutdown()
-
-    async def _restart_app():
-        if _global_running["v"]:
-            with ui.dialog() as _dlg, ui.card():
-                ui.label("⚠ 앱 재시작시 상품수집이 초기화 됩니다. 진행하시겠습니까?").classes("text-base font-bold mb-4")
-                with ui.row().classes("gap-2 justify-end w-full"):
-                    ui.button("취소", on_click=_dlg.close).props("flat color=grey")
-                    async def _confirm_restart(d=_dlg):
-                        d.close()
-                        await _do_restart_now()
-                    ui.button("확인", on_click=_confirm_restart).props("color=red")
-            _dlg.open()
-            return
-        await _do_restart_now()
 
     # ── 풀 width 그라디언트 탑바 ────────────────────────────
     with ui.element("div").classes("topbar"):
