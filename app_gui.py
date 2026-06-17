@@ -2059,67 +2059,92 @@ async def _process_entry(
         _gk_cat = getattr(_settings, "GEMINI_API_KEY", "")
         _gm_cat = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
 
-        # ── 1순위: Gemini — 전체 상품명으로 문맥 파악 후 카테고리 매핑 ──────
+        # ── 1순위: Gemini — Wing 카테고리 목록에서 직접 선택 ──────
         if not entry.category_is_manual and not entry.category_id and _gk_cat:
             try:
                 import google.generativeai as _gc_genai
                 _gc_genai.configure(api_key=_gk_cat)
                 _gc_model = _gc_genai.GenerativeModel(_gm_cat)
-                _cat_primary_prompt = (
-                    f"상품명(전체): {product.name}\n"
-                    f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
-                    "이 상품에 맞는 쿠팡 Wing 카테고리 소분류 명칭을 1~3개 답하세요.\n\n"
-                    "⚠️ 필수 분류 규칙:\n"
-                    "1. 식품 젤리(캔디/구미/젤리빈/하리보 등) → 반드시 '츄잉젤리' 또는 '사탕' 카테고리."
-                    " 절대 '캔디/젤리'(강아지간식), '젤리/우레탄밴드', '젤리슈즈' 등 비식품/반려동물 카테고리 금지.\n"
-                    "2. 상품명/네이버카테고리에 강아지/고양이/소형견/대형견/"
-                    "반려견/반려묘/펫/pet 등 반려동물 키워드가 있으면\n"
-                    "   절대 사람용 건강기능식품/비타민/영양제 카테고리 선택 금지."
-                    " 반드시 반려동물 전용 카테고리를 선택하세요.\n\n"
-                    "강아지 Wing 카테고리 소분류 예시:\n"
-                    "  관절/칼슘 보조제 → 칼슘/관절영양제\n"
-                    "  간기능/심장 보조제 → 심장/간기능\n"
-                    "  면역 보조제 → 면역\n"
-                    "  피부/모질 보조제 → 피부/모질\n"
-                    "  눈/귀 보조제 → 눈/귀 영양제\n"
-                    "  종합/오메가/EFA 영양제 → 영양제\n"
-                    "고양이 Wing 카테고리 소분류 예시:\n"
-                    "  관절 보조제 → 관절\n"
-                    "  방광/비뇨기 → 방광\n"
-                    "  종합 영양제 → 영양제\n"
-                    "강아지&고양이 겸용:\n"
-                    "  겸용 관절 보조제 → 강아지&고양이 관절영양제\n"
-                    "  겸용 영양제 → 강아지&고양이 영양제\n\n"
-                    "형식: 카테고리명1,카테고리명2,카테고리명3\n"
-                    "카테고리 명칭만 답하세요. 설명 금지."
-                )
-                log_(f"[{entry.uid[:6]}] [1순위] Gemini 카테고리 분석 중...")
-                _gc_resp = await loop.run_in_executor(
-                    None, lambda: _gc_model.generate_content(_cat_primary_prompt)
-                )
-                _gc_txt = (_gc_resp.text or "").strip()
-                if _gc_txt:
-                    _gc_candidates = [c.strip() for c in _gc_txt.split(",") if c.strip()]
-                    for _gc_cand in _gc_candidates:
-                        _gc_res = detector.search_by_keyword(_gc_cand)
-                        if not _gc_res:
-                            _gc_res = detector._fallback_wing_search(_gc_cand)
-                        if _gc_res:
-                            _gc_id, _gc_gcat, _gc_name = _gc_res
+
+                _wing_flat_g = _get_wing_cat_flat()
+                _nav_l1 = _naver_to_wing_l1(product.naver_category)
+
+                if _nav_l1:
+                    _gc_cats = [
+                        c for c in _wing_flat_g
+                        if c.get("path", "").split(">")[1:2] == [_nav_l1]
+                    ]
+                    if not _gc_cats:
+                        _gc_cats = _wing_flat_g
+                else:
+                    _gc_cats = []  # L1 불명 → Gemini 건너뜀, 키워드 사전으로
+
+                if _gc_cats:
+                    _NL = "\n"
+                    _cat_list_text = _NL.join(
+                        f"{c['name']}  |  {c.get('path','')}"
+                        for c in _gc_cats
+                        if c.get("name") and c.get("code")
+                    )
+                    _cat_primary_prompt = (
+                        f"상품명(전체): {product.name}\n"
+                        f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
+                        "아래 쿠팡 Wing 카테고리 목록에서 이 상품에 가장 적합한 카테고리명 하나를 선택하세요.\n"
+                        "반드시 목록에 있는 카테고리명(|왼쪽 값)을 그대로 답하세요. 설명 없이 카테고리명만.\n\n"
+                        f"카테고리 목록:\n{_cat_list_text}\n\n"
+                        "주의:\n"
+                        "- 식품 젤리/구미/사탕 → 식품 하위의 '츄잉젤리','젤리빈','츄잉캔디' 등 (뷰티/반려동물 금지)\n"
+                        "- 반려동물 상품 → 반려/애완용품 하위 카테고리만\n"
+                    )
+                    log_(f"[{entry.uid[:6]}] [1순위] Gemini 카테고리 목록 선택 중... (L1:{_nav_l1}, {len(_gc_cats)}개)")
+                    _gc_resp = await loop.run_in_executor(
+                        None, lambda: _gc_model.generate_content(_cat_primary_prompt)
+                    )
+                    _gc_txt = (_gc_resp.text or "").strip().strip('"').strip("'").strip()
+                    if _gc_txt:
+                        _gc_norm = _gc_txt.lower().replace(" ", "").replace("-", "")
+                        _gc_matched = None
+                        for _cat in _gc_cats:
+                            if _cat.get("name", "").lower().replace(" ", "").replace("-", "") == _gc_norm:
+                                _gc_matched = _cat
+                                break
+                        if not _gc_matched:
+                            for _cat in _gc_cats:
+                                _cn = _cat.get("name", "").lower().replace(" ", "").replace("-", "")
+                                if _gc_norm in _cn or _cn in _gc_norm:
+                                    _gc_matched = _cat
+                                    break
+                        if _gc_matched:
+                            from modules.category_detector import _gosisi_from_path as _gfp
+                            _gc_id = str(_gc_matched["code"])
+                            _gc_gcat = _gfp(_gc_matched.get("path", ""))
+                            _gc_display = _gc_matched["name"]
                             if not entry.category_is_manual:
                                 entry.category_id = _gc_id
-                            entry.gosisi_cat       = _gc_gcat
-                            entry.detected_keyword = f"[Gemini1순위]{_gc_name}"
-                            log_(f"[{entry.uid[:6]}] ✅ [1순위] Gemini: '{_gc_cand}' → "
-                                 f"ID={entry.category_id} ({_gc_name})")
-                            break
-                    if not entry.category_id:
-                        log_(f"[{entry.uid[:6]}] ⚠ Gemini 후보 {_gc_candidates} wing 매핑 실패 → 키워드 사전으로")
+                            entry.gosisi_cat = _gc_gcat
+                            entry.detected_keyword = f"[Gemini1순위]{_gc_display}"
+                            log_(f"[{entry.uid[:6]}] ✅ [1순위] Gemini 선택: '{_gc_txt}' → "
+                                 f"ID={entry.category_id} ({_gc_display})")
+                        else:
+                            log_(f"[{entry.uid[:6]}] ⚠ Gemini '{_gc_txt}' 목록 미매칭 → keyword fallback")
+                            _gc_res = detector.search_by_keyword(_gc_txt)
+                            if not _gc_res:
+                                _gc_res = detector._fallback_wing_search(_gc_txt)
+                            if _gc_res:
+                                _gc_id, _gc_gcat, _gc_name = _gc_res
+                                if not entry.category_is_manual:
+                                    entry.category_id = _gc_id
+                                entry.gosisi_cat = _gc_gcat
+                                entry.detected_keyword = f"[Gemini1순위]{_gc_name}"
+                                log_(f"[{entry.uid[:6]}] ✅ [1순위] Gemini fallback: '{_gc_txt}' → ID={entry.category_id}")
+                            else:
+                                log_(f"[{entry.uid[:6]}] ⚠ Gemini '{_gc_txt}' wing 매핑 실패 → 키워드 사전으로")
+                    else:
+                        log_(f"[{entry.uid[:6]}] ⚠ Gemini 응답 없음 → 키워드 사전으로")
                 else:
-                    log_(f"[{entry.uid[:6]}] ⚠ Gemini 응답 없음 → 키워드 사전으로")
+                    log_(f"[{entry.uid[:6]}] ⚠ L1 불명 — Gemini 카테고리 목록 건너뜀 → 키워드 사전으로")
             except Exception as _gce:
                 log_(f"[{entry.uid[:6]}] ⚠ [1순위] Gemini 카테고리 분석 실패: {_gce}")
-
         # ── 2순위: 키워드 사전 (Gemini 실패/미매핑 시) ──────────────────
         if not entry.category_is_manual and not entry.category_id:
             _det_id, _det_gosisi, _det_kw = detector.detect(
@@ -4018,10 +4043,39 @@ def _get_wing_cat_flat() -> list:
             if not parts or not code:
                 continue
             label = " > ".join(parts)
-            flat.append({"label": label, "name": name, "code": code})
+            flat.append({"label": label, "name": name, "code": code, "path": path_str})
 
     _WING_CAT_FLAT = flat
     return flat
+
+
+def _naver_to_wing_l1(naver_cat: str) -> str | None:
+    """네이버 카테고리 문자열 → Wing L1 카테고리명 (필터링용)."""
+    if not naver_cat:
+        return None
+    _MAP = {
+        "식품": "식품", "가공식품": "식품", "건강식품": "식품", "과자": "식품", "음료": "식품",
+        "뷰티": "뷰티", "헬스/뷰티": "뷰티", "화장품": "뷰티",
+        "스포츠/레져": "스포츠/레져", "스포츠": "스포츠/레져", "레져": "스포츠/레져",
+        "가전/디지털": "가전/디지털", "가전": "가전/디지털", "디지털": "가전/디지털",
+        "반려/애완용품": "반려/애완용품", "반려동물": "반려/애완용품", "반려": "반려/애완용품",
+        "자동차용품": "자동차용품", "자동차": "자동차용품",
+        "생활용품": "생활용품",
+        "완구/취미": "완구/취미", "완구": "완구/취미", "취미": "완구/취미",
+        "출산/유아동": "출산/유아동", "유아동": "출산/유아동", "출산": "출산/유아동",
+        "도서": "도서", "책": "도서",
+        "음반/DVD": "음반/DVD", "음반": "음반/DVD",
+        "가구/홈데코": "가구/홈데코", "가구": "가구/홈데코", "홈데코": "가구/홈데코",
+        "주방용품": "주방용품", "주방": "주방용품",
+        "문구/오피스": "문구/오피스", "문구": "문구/오피스",
+        "패션의류잡화": "패션의류잡화", "패션": "패션의류잡화", "의류": "패션의류잡화",
+    }
+    for _part in naver_cat.split(">"):
+        _p = _part.strip()
+        if _p in _MAP:
+            return _MAP[_p]
+    return None
+
 
 def _get_wing_cat_tree() -> dict:
     """
@@ -6005,12 +6059,12 @@ async def page_error_fix() -> None:
                         dl_btn.set_enabled(False)
 
                     _upload_ref["el"] = ui.upload(
-                        label="📁 .xlsx / .xlsm 선택",
+                        label="📁 .xlsx / .xlsm 선택 (선택 즉시 자동 업로드)",
                         on_upload=_on_upload,
-                        auto_upload=False,
+                        auto_upload=True,
                         multiple=False,
                     ).props("accept=.xlsx,.xlsm,.xls flat dense color=primary")
-                    ui.label("파일 선택 후 ▶ 버튼을 눌러야 서버로 전송됩니다.").classes("text-xs text-slate-400 mt-1")
+                    ui.label("앱 재시작 후에는 파일을 다시 선택해야 합니다 (서버에 파일이 남아있지 않음)").classes("text-xs text-slate-400 mt-1")
 
             # ── ② Gemini 검수 ─────────────────────────────────
             with ui.card().classes("shadow-sm w-full mb-4"):
@@ -7331,15 +7385,18 @@ def page() -> None:
                     def _get_queue_brands():
                         return sorted(set(
                             (e.brand or "").strip()
-                            for e in _global_queue if (e.brand or "").strip()
+                            for e in _global_queue
+                            if (e.brand or "").strip() and e.status in ("done", "error")
                         ))
 
                     def _get_queue_cat_options():
-                        """큐의 고유 카테고리 {표시라벨: id} dict."""
+                        """큐의 고유 카테고리 {표시라벨: id} dict (완료 항목 기준)."""
                         _flat = _get_wing_cat_flat()
                         _id_to_name = {str(c.get("code","")): c.get("label") or c.get("name","") for c in _flat}
                         seen, result = set(), {}
                         for _e in _global_queue:
+                            if _e.status not in ("done", "error"):
+                                continue
                             cid = (_e.category_id or "").strip()
                             if cid and cid not in seen:
                                 seen.add(cid)
@@ -7458,11 +7515,13 @@ def page() -> None:
 
                                     cnt = 0
                                     for _qi, _e in enumerate(_global_queue, 1):
-                                        # ① 번호 필터 (지정된 경우)
+                                        # ① 번호 필터 (지정된 경우) — 번호 지정 시 상태 무관
                                         if num_set and _qi not in num_set:
                                             continue
-                                        # ② 번호 미지정 시 브랜드·카테고리 조건 적용
+                                        # ② 번호 미지정 시: 완료 항목만 + 브랜드·카테고리 조건
                                         if not num_set:
+                                            if _e.status not in ("done", "error"):
+                                                continue
                                             b_match = (not old_b) or ((_e.brand or "").strip().upper() == old_b.upper())
                                             c_match = (not old_cid) or ((_e.category_id or "").strip() == old_cid)
                                             if old_b and old_cid:
