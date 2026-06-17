@@ -141,7 +141,26 @@ echo.
 if errorlevel 1 (
     echo.
     echo ERROR: GUI exited with an error -- see log above.
-    pause
+)
+
+:: -----------------------------------------------------------
+:: [Post] 앱 종료 후 데이터 파일 자동 git 커밋 & 푸시
+:: -----------------------------------------------------------
+echo.
+echo [Post] 데이터 자동 저장 중 (git) ...
+cd /d "%ROOT%"
+git add data/collection_history.json data/queue_state.json data/price_watch.json data/brand_map.json 2>nul
+git diff --cached --quiet
+if errorlevel 1 (
+    git commit -m "auto: 앱 종료 시 데이터 자동 저장 [%DATE% %TIME%]" 2>nul
+    git push origin main 2>nul
+    if errorlevel 1 (
+        echo [Post] push 실패 (오프라인?) -- 로컬 커밋만 저장됨
+    ) else (
+        echo [Post] 데이터 GitHub 저장 완료
+    )
+) else (
+    echo [Post] 변경된 데이터 없음 -- skip
 )
 goto :done
 
