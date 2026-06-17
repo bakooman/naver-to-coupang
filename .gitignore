@@ -18,6 +18,7 @@ coupang_data.json
 *.bak*
 *.bak_*
 *.txt
+!requirements.txt
 analyze*.py
 debug_*.py
 check_*.py

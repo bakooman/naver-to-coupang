@@ -9529,6 +9529,24 @@ def page() -> None:
 
     ui.timer(5.0, _adjust_tick_interval)
 
+    # ── TOP 스크롤 버튼 (우측 하단 고정) ─────────────────────────
+    ui.add_css("""
+        .top-scroll-btn {
+            position: fixed !important;
+            bottom: 28px !important;
+            right: 28px !important;
+            z-index: 9999 !important;
+            opacity: 0.85;
+            transition: opacity 0.2s;
+        }
+        .top-scroll-btn:hover { opacity: 1; }
+    """)
+    ui.button("▲ TOP", on_click=lambda: ui.run_javascript(
+        "window.scrollTo({top:0,behavior:'smooth'})"
+    )).classes("top-scroll-btn shadow-xl").props(
+        "color=indigo round size=md"
+    )
+
 
 # ── 앱 생애주기 ───────────────────────────────────────────────────
 
