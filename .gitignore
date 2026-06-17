@@ -10,6 +10,7 @@ data/wing_session*.json
 data/*
 !data/collection_history.json
 !data/queue_state.json
+!data/price_watch.json
 coupang_data.json
 
 # 백업/임시 파일
