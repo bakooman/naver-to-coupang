@@ -4543,9 +4543,6 @@ def _make_nav_header(current: str):
         ui.button(alert_label, on_click=lambda: ui.navigate.to("/monitor")).classes(mon_cls)
 
         ui.html('<div class="nav-spacer"></div>')
-        ui.html('<div class="nav-divider"></div>')
-
-        ui.button("🔄 재시작", on_click=_restart_app).classes("topbar-restart")
 
 
 # ── 가격변동 모니터링 페이지 ─────────────────────────────────────
@@ -6313,8 +6310,10 @@ def page() -> None:
 
     _add_common_head()
 
-    # ── 로그아웃 버튼 (우상단 고정) ──────────────────────────────────
-    with ui.element('div').style('position:fixed;top:8px;right:12px;z-index:9999'):
+    # ── 로그아웃 / 앱 재시작 버튼 (우상단 고정) ──────────────────────────────────
+    with ui.element('div').style('position:fixed;top:8px;right:12px;z-index:9999;display:flex;gap:6px;align-items:center'):
+        ui.button('앱 재시작', on_click=_restart_app) \
+          .props('flat dense color=red-4 size=sm')
         ui.button('로그아웃', on_click=lambda: ui.navigate.to('/logout')) \
           .props('flat dense color=grey-5 size=sm')
 
