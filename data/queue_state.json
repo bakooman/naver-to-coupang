@@ -1,6 +1,6 @@
 [
   {
-    "uid": "e10957f6",
+    "uid": "f4a38a85",
     "url": "https://smartstore.naver.com/euromarkt/products/8670482219",
     "brand": "하리보",
     "qtys": [
@@ -19,7 +19,7 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "79578",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
     "naver_price": 3600,
@@ -35,7 +35,7 @@
     "status": "done"
   },
   {
-    "uid": "6e26b8fc",
+    "uid": "6fa78910",
     "url": "https://smartstore.naver.com/euromarkt/products/8670502491",
     "brand": "하리보",
     "qtys": [
@@ -54,7 +54,7 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "79578",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
     "naver_price": 3600,
@@ -70,7 +70,7 @@
     "status": "done"
   },
   {
-    "uid": "8cd6a47b",
+    "uid": "c45a6730",
     "url": "https://smartstore.naver.com/euromarkt/products/8670483546",
     "brand": "하리보",
     "qtys": [
@@ -89,7 +89,7 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "79578",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
     "naver_price": 3600,
@@ -105,7 +105,7 @@
     "status": "done"
   },
   {
-    "uid": "a87ced28",
+    "uid": "cf122bfa",
     "url": "https://smartstore.naver.com/euromarkt/products/10972097790",
     "brand": "하리보",
     "qtys": [
@@ -124,7 +124,7 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "79578",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
     "naver_price": 3600,
@@ -140,9 +140,9 @@
     "status": "done"
   },
   {
-    "uid": "1e9e4e21",
+    "uid": "4f8ff790",
     "url": "https://smartstore.naver.com/euromarkt/products/8670494891",
-    "brand": "HARIBO",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -159,7 +159,7 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "79578",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
     "naver_price": 3600,
@@ -175,9 +175,9 @@
     "status": "done"
   },
   {
-    "uid": "25669120",
+    "uid": "3205d788",
     "url": "https://smartstore.naver.com/euromarkt/products/8670500678",
-    "brand": "HARIBO",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -194,7 +194,7 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "79578",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
     "naver_price": 3600,
@@ -210,9 +210,9 @@
     "status": "done"
   },
   {
-    "uid": "c3a846a0",
+    "uid": "d632419c",
     "url": "https://smartstore.naver.com/euromarkt/products/8670490137",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -229,10 +229,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 2500,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -242,12 +242,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "processing"
+    "status": "done"
   },
   {
-    "uid": "b8613f32",
+    "uid": "91cd2adc",
     "url": "https://smartstore.naver.com/euromarkt/products/8670504228",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -264,10 +264,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -277,12 +277,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "f5b16694",
+    "uid": "bb6dc202",
     "url": "https://smartstore.naver.com/euromarkt/products/8670480315",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -299,10 +299,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -312,12 +312,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "fb359361",
+    "uid": "7bbd557d",
     "url": "https://smartstore.naver.com/euromarkt/products/11900761851",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -334,10 +334,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -347,12 +347,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "5ea06eb5",
+    "uid": "5849b995",
     "url": "https://smartstore.naver.com/euromarkt/products/11385969008",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -369,10 +369,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -382,12 +382,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "ff116f06",
+    "uid": "73706d75",
     "url": "https://smartstore.naver.com/euromarkt/products/11002995372",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -404,10 +404,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -417,12 +417,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "66e91c70",
+    "uid": "0af8e761",
     "url": "https://smartstore.naver.com/euromarkt/products/10972097380",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -439,10 +439,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 6600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -452,12 +452,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "cfdcde82",
+    "uid": "57c19dec",
     "url": "https://smartstore.naver.com/euromarkt/products/10972095754",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -474,10 +474,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 6600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -487,12 +487,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "dab09d1e",
+    "uid": "3b06e8a1",
     "url": "https://smartstore.naver.com/euromarkt/products/9259509678",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -509,10 +509,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -522,12 +522,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "e32af00d",
+    "uid": "23a72c46",
     "url": "https://smartstore.naver.com/euromarkt/products/8670496926",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -544,10 +544,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -557,12 +557,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "5f4d7fe3",
+    "uid": "a2c33bea",
     "url": "https://smartstore.naver.com/euromarkt/products/12773574661",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -579,10 +579,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -592,12 +592,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "45de33cf",
+    "uid": "f6ac083f",
     "url": "https://smartstore.naver.com/euromarkt/products/10972096748",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -614,10 +614,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -627,12 +627,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "f6149c16",
+    "uid": "5663df73",
     "url": "https://smartstore.naver.com/euromarkt/products/8670500155",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -649,10 +649,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -662,12 +662,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "d4275bdc",
+    "uid": "eb7d017c",
     "url": "https://smartstore.naver.com/euromarkt/products/8670489434",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -684,10 +684,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -697,12 +697,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "6816c026",
+    "uid": "c867b648",
     "url": "https://smartstore.naver.com/euromarkt/products/8670475056",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -719,10 +719,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -732,12 +732,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "7c63e388",
+    "uid": "cd8612d9",
     "url": "https://smartstore.naver.com/euromarkt/products/8670474252",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -754,10 +754,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -767,12 +767,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "3cabc981",
+    "uid": "36ed821e",
     "url": "https://smartstore.naver.com/euromarkt/products/12809682003",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -789,10 +789,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -802,12 +802,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "2f0b261f",
+    "uid": "8db6add9",
     "url": "https://smartstore.naver.com/euromarkt/products/11871762895",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -824,10 +824,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -837,12 +837,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "1dfaf828",
+    "uid": "c0457c10",
     "url": "https://smartstore.naver.com/euromarkt/products/11385968478",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -859,10 +859,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -872,12 +872,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "3695e4fb",
+    "uid": "6cf5052a",
     "url": "https://smartstore.naver.com/euromarkt/products/8670487672",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -894,10 +894,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -907,12 +907,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "900b45de",
+    "uid": "4e5c9b31",
     "url": "https://smartstore.naver.com/euromarkt/products/13029962831",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -929,10 +929,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -942,12 +942,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "4f958868",
+    "uid": "2fb7f0ce",
     "url": "https://smartstore.naver.com/euromarkt/products/13025972395",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -964,10 +964,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3300,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -977,12 +977,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "bdd79cd3",
+    "uid": "f5ae2292",
     "url": "https://smartstore.naver.com/euromarkt/products/11815001358",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -999,10 +999,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1012,12 +1012,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "d78f4298",
+    "uid": "1e9ab6c1",
     "url": "https://smartstore.naver.com/euromarkt/products/11462899416",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1034,10 +1034,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1047,12 +1047,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "3d95be24",
+    "uid": "1ea0a263",
     "url": "https://smartstore.naver.com/euromarkt/products/11462899245",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1069,10 +1069,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 6600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1082,12 +1082,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "8477e446",
+    "uid": "2e82bb9d",
     "url": "https://smartstore.naver.com/euromarkt/products/11385968370",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1104,10 +1104,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1117,12 +1117,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "e0ba9558",
+    "uid": "2ccbd1a2",
     "url": "https://smartstore.naver.com/euromarkt/products/11385967883",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1139,10 +1139,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3300,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1152,12 +1152,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "b6eef56a",
+    "uid": "707a37d8",
     "url": "https://smartstore.naver.com/euromarkt/products/11002995268",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1174,10 +1174,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1187,12 +1187,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "18a8f4fa",
+    "uid": "c2e69c66",
     "url": "https://smartstore.naver.com/euromarkt/products/10972096925",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1209,10 +1209,10 @@
     "gtin": "",
     "source_file": "하리보.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1222,12 +1222,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "8b7df8be",
+    "uid": "14352897",
     "url": "https://smartstore.naver.com/euromarkt/products/9474286009",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1244,10 +1244,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1257,12 +1257,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "0d7dbbf4",
+    "uid": "8534f63d",
     "url": "https://smartstore.naver.com/euromarkt/products/8670512517",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1279,10 +1279,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 4100,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1292,12 +1292,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "b904249b",
+    "uid": "111f54aa",
     "url": "https://smartstore.naver.com/euromarkt/products/8670512007",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1314,10 +1314,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 4100,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1327,12 +1327,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "57161d41",
+    "uid": "6e6fb964",
     "url": "https://smartstore.naver.com/euromarkt/products/8670505337",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1349,10 +1349,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1362,12 +1362,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "4d1f818f",
+    "uid": "bf52ac22",
     "url": "https://smartstore.naver.com/euromarkt/products/8670503012",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1384,10 +1384,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1397,12 +1397,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "537c35e3",
+    "uid": "6055b315",
     "url": "https://smartstore.naver.com/euromarkt/products/8670492415",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1419,10 +1419,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1432,12 +1432,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "1c467931",
+    "uid": "6081c4fb",
     "url": "https://smartstore.naver.com/euromarkt/products/8670486589",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1454,10 +1454,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1467,12 +1467,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "80a498e8",
+    "uid": "48379359",
     "url": "https://smartstore.naver.com/euromarkt/products/8670486073",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1489,10 +1489,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1502,12 +1502,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "4ea612ab",
+    "uid": "de433b45",
     "url": "https://smartstore.naver.com/euromarkt/products/8670485547",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1524,10 +1524,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1537,12 +1537,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "538576f3",
+    "uid": "c265925c",
     "url": "https://smartstore.naver.com/euromarkt/products/13302186630",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1559,10 +1559,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1572,12 +1572,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "9e14de6a",
+    "uid": "2369d7bf",
     "url": "https://smartstore.naver.com/euromarkt/products/12628317368",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1594,10 +1594,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 4500,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1607,12 +1607,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "488d84c1",
+    "uid": "6524d019",
     "url": "https://smartstore.naver.com/euromarkt/products/12286434458",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1629,10 +1629,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 4100,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1642,12 +1642,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "031bba08",
+    "uid": "64feb1ae",
     "url": "https://smartstore.naver.com/euromarkt/products/11814997947",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1664,10 +1664,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3300,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1677,12 +1677,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "7b2140f6",
+    "uid": "a8d19df8",
     "url": "https://smartstore.naver.com/euromarkt/products/11462899074",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1699,10 +1699,10 @@
     "gtin": "",
     "source_file": "하리보1.txt",
     "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "category_id": "65882",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -1712,10 +1712,10 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
-    "uid": "6ef9728c",
+    "uid": "f2af169e",
     "url": "https://smartstore.naver.com/euromarkt/products/11355465051",
     "brand": "",
     "qtys": [
@@ -1747,10 +1747,10 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "processing"
   },
   {
-    "uid": "21a0b8ae",
+    "uid": "792d5edb",
     "url": "https://smartstore.naver.com/euromarkt/products/11355462637",
     "brand": "",
     "qtys": [
@@ -1785,7 +1785,7 @@
     "status": "pending"
   },
   {
-    "uid": "c33a25c6",
+    "uid": "a12f9266",
     "url": "https://smartstore.naver.com/euromarkt/products/11116580562",
     "brand": "",
     "qtys": [
@@ -1820,7 +1820,7 @@
     "status": "pending"
   },
   {
-    "uid": "73e98187",
+    "uid": "7a7b7b49",
     "url": "https://smartstore.naver.com/euromarkt/products/11116580259",
     "brand": "",
     "qtys": [
@@ -1855,7 +1855,7 @@
     "status": "pending"
   },
   {
-    "uid": "8cffbd08",
+    "uid": "835561c3",
     "url": "https://smartstore.naver.com/euromarkt/products/10972098641",
     "brand": "",
     "qtys": [
@@ -1890,7 +1890,7 @@
     "status": "pending"
   },
   {
-    "uid": "178ec91b",
+    "uid": "42f13b51",
     "url": "https://smartstore.naver.com/euromarkt/products/10972098077",
     "brand": "",
     "qtys": [
@@ -1925,7 +1925,7 @@
     "status": "pending"
   },
   {
-    "uid": "02c53810",
+    "uid": "6c9ca6c6",
     "url": "https://smartstore.naver.com/euromarkt/products/10972097288",
     "brand": "",
     "qtys": [
@@ -1960,7 +1960,7 @@
     "status": "pending"
   },
   {
-    "uid": "1d61e282",
+    "uid": "63590424",
     "url": "https://smartstore.naver.com/euromarkt/products/10972096711",
     "brand": "",
     "qtys": [
@@ -1995,7 +1995,7 @@
     "status": "pending"
   },
   {
-    "uid": "d51e9b08",
+    "uid": "eea789be",
     "url": "https://smartstore.naver.com/euromarkt/products/10972095493",
     "brand": "",
     "qtys": [
@@ -2030,7 +2030,7 @@
     "status": "pending"
   },
   {
-    "uid": "be62fae1",
+    "uid": "67cefdd5",
     "url": "https://smartstore.naver.com/euromarkt/products/9474285982",
     "brand": "",
     "qtys": [
@@ -2065,7 +2065,7 @@
     "status": "pending"
   },
   {
-    "uid": "8e3321dd",
+    "uid": "d52d397d",
     "url": "https://smartstore.naver.com/euromarkt/products/8670497588",
     "brand": "",
     "qtys": [
@@ -2100,7 +2100,7 @@
     "status": "pending"
   },
   {
-    "uid": "a87b613e",
+    "uid": "50bf7013",
     "url": "https://smartstore.naver.com/euromarkt/products/8670496215",
     "brand": "",
     "qtys": [
@@ -2135,7 +2135,7 @@
     "status": "pending"
   },
   {
-    "uid": "170e694c",
+    "uid": "97fa59ce",
     "url": "https://smartstore.naver.com/euromarkt/products/8670487130",
     "brand": "",
     "qtys": [
@@ -2170,7 +2170,7 @@
     "status": "pending"
   },
   {
-    "uid": "420c3635",
+    "uid": "58f1c03a",
     "url": "https://smartstore.naver.com/euromarkt/products/8670484904",
     "brand": "",
     "qtys": [
@@ -2205,7 +2205,7 @@
     "status": "pending"
   },
   {
-    "uid": "b658562c",
+    "uid": "11f1fedf",
     "url": "https://smartstore.naver.com/euromarkt/products/13561590273",
     "brand": "",
     "qtys": [
@@ -2240,7 +2240,7 @@
     "status": "pending"
   },
   {
-    "uid": "eb1dcf37",
+    "uid": "4cd1423a",
     "url": "https://smartstore.naver.com/euromarkt/products/13561590187",
     "brand": "",
     "qtys": [
@@ -2275,7 +2275,7 @@
     "status": "pending"
   },
   {
-    "uid": "a134b426",
+    "uid": "097a0bda",
     "url": "https://smartstore.naver.com/euromarkt/products/13561590100",
     "brand": "",
     "qtys": [
@@ -2310,7 +2310,7 @@
     "status": "pending"
   },
   {
-    "uid": "7d4fa96b",
+    "uid": "f4300f8c",
     "url": "https://smartstore.naver.com/euromarkt/products/13527145889",
     "brand": "",
     "qtys": [
@@ -2345,7 +2345,7 @@
     "status": "pending"
   },
   {
-    "uid": "b60f57c3",
+    "uid": "c0e7ff4f",
     "url": "https://smartstore.naver.com/euromarkt/products/13527145333",
     "brand": "",
     "qtys": [
@@ -2380,7 +2380,7 @@
     "status": "pending"
   },
   {
-    "uid": "d5b9bbb1",
+    "uid": "0e9937aa",
     "url": "https://smartstore.naver.com/euromarkt/products/13302186802",
     "brand": "",
     "qtys": [
@@ -2415,7 +2415,7 @@
     "status": "pending"
   },
   {
-    "uid": "1bf45b1c",
+    "uid": "075ccda7",
     "url": "https://smartstore.naver.com/euromarkt/products/13154302160",
     "brand": "",
     "qtys": [
@@ -2450,7 +2450,7 @@
     "status": "pending"
   },
   {
-    "uid": "ca91f261",
+    "uid": "de9de747",
     "url": "https://smartstore.naver.com/euromarkt/products/13154293489",
     "brand": "",
     "qtys": [
@@ -2485,7 +2485,7 @@
     "status": "pending"
   },
   {
-    "uid": "350d01a3",
+    "uid": "ebdbbed6",
     "url": "https://smartstore.naver.com/euromarkt/products/13025970485",
     "brand": "",
     "qtys": [
@@ -2520,7 +2520,7 @@
     "status": "pending"
   },
   {
-    "uid": "80c0f82c",
+    "uid": "72014da9",
     "url": "https://smartstore.naver.com/euromarkt/products/12773574797",
     "brand": "",
     "qtys": [
@@ -2555,7 +2555,7 @@
     "status": "pending"
   },
   {
-    "uid": "21c8697e",
+    "uid": "844a8033",
     "url": "https://smartstore.naver.com/euromarkt/products/12538277383",
     "brand": "",
     "qtys": [
@@ -2590,7 +2590,7 @@
     "status": "pending"
   },
   {
-    "uid": "f9ba1eb2",
+    "uid": "0beefd8a",
     "url": "https://smartstore.naver.com/euromarkt/products/12538274107",
     "brand": "",
     "qtys": [
@@ -2625,7 +2625,7 @@
     "status": "pending"
   },
   {
-    "uid": "8f71633c",
+    "uid": "38d99112",
     "url": "https://smartstore.naver.com/euromarkt/products/12286434151",
     "brand": "",
     "qtys": [
@@ -2660,7 +2660,7 @@
     "status": "pending"
   },
   {
-    "uid": "a689a63f",
+    "uid": "52d4fc5e",
     "url": "https://smartstore.naver.com/euromarkt/products/11814997887",
     "brand": "",
     "qtys": [
@@ -2695,7 +2695,7 @@
     "status": "pending"
   },
   {
-    "uid": "09ee3c37",
+    "uid": "248ab520",
     "url": "https://smartstore.naver.com/euromarkt/products/11462899329",
     "brand": "",
     "qtys": [
@@ -2730,7 +2730,7 @@
     "status": "pending"
   },
   {
-    "uid": "43b64eef",
+    "uid": "df877125",
     "url": "https://smartstore.naver.com/euromarkt/products/11462899152",
     "brand": "",
     "qtys": [
@@ -2765,7 +2765,7 @@
     "status": "pending"
   },
   {
-    "uid": "52bdd5ef",
+    "uid": "3ae9c79a",
     "url": "https://smartstore.naver.com/euromarkt/products/11385968953",
     "brand": "",
     "qtys": [
@@ -2800,7 +2800,7 @@
     "status": "pending"
   },
   {
-    "uid": "64db3a4e",
+    "uid": "ccf074fc",
     "url": "https://smartstore.naver.com/euromarkt/products/11385968075",
     "brand": "",
     "qtys": [
@@ -2835,7 +2835,7 @@
     "status": "pending"
   },
   {
-    "uid": "00e7a1f8",
+    "uid": "a846e647",
     "url": "https://smartstore.naver.com/euromarkt/products/11355464943",
     "brand": "",
     "qtys": [
@@ -2870,7 +2870,7 @@
     "status": "pending"
   },
   {
-    "uid": "f67a79b6",
+    "uid": "7996da44",
     "url": "https://smartstore.naver.com/euromarkt/products/11355462888",
     "brand": "",
     "qtys": [
@@ -2905,7 +2905,7 @@
     "status": "pending"
   },
   {
-    "uid": "40b83a48",
+    "uid": "920d626a",
     "url": "https://smartstore.naver.com/euromarkt/products/11355462765\\",
     "brand": "",
     "qtys": [
@@ -2940,7 +2940,7 @@
     "status": "pending"
   },
   {
-    "uid": "4eb97e1a",
+    "uid": "5d0de652",
     "url": "https://smartstore.naver.com/euromarkt/products/11355461991",
     "brand": "",
     "qtys": [
@@ -2975,7 +2975,7 @@
     "status": "pending"
   },
   {
-    "uid": "a96f2ae3",
+    "uid": "00db9aba",
     "url": "https://smartstore.naver.com/euromarkt/products/11252988215",
     "brand": "",
     "qtys": [
@@ -3010,7 +3010,7 @@
     "status": "pending"
   },
   {
-    "uid": "7aa5f850",
+    "uid": "0fac9f51",
     "url": "https://smartstore.naver.com/euromarkt/products/11252987852",
     "brand": "",
     "qtys": [
@@ -3045,7 +3045,7 @@
     "status": "pending"
   },
   {
-    "uid": "2e0549de",
+    "uid": "ae21b797",
     "url": "https://smartstore.naver.com/euromarkt/products/11116580431",
     "brand": "",
     "qtys": [
@@ -3080,7 +3080,7 @@
     "status": "pending"
   },
   {
-    "uid": "9d09579b",
+    "uid": "f3b5c139",
     "url": "https://smartstore.naver.com/euromarkt/products/11116580139",
     "brand": "",
     "qtys": [
@@ -3115,7 +3115,7 @@
     "status": "pending"
   },
   {
-    "uid": "c67f9601",
+    "uid": "0e728e1d",
     "url": "https://smartstore.naver.com/euromarkt/products/11116579867",
     "brand": "",
     "qtys": [
@@ -3150,7 +3150,7 @@
     "status": "pending"
   },
   {
-    "uid": "6bffa0b1",
+    "uid": "262127a1",
     "url": "https://smartstore.naver.com/euromarkt/products/11002995108",
     "brand": "",
     "qtys": [
@@ -3185,7 +3185,7 @@
     "status": "pending"
   },
   {
-    "uid": "d2bad256",
+    "uid": "cdc26213",
     "url": "https://smartstore.naver.com/euromarkt/products/10972097893",
     "brand": "",
     "qtys": [
@@ -3220,7 +3220,7 @@
     "status": "pending"
   },
   {
-    "uid": "06f745f1",
+    "uid": "d9e6d6ca",
     "url": "https://smartstore.naver.com/euromarkt/products/10972097207",
     "brand": "",
     "qtys": [
@@ -3255,7 +3255,7 @@
     "status": "pending"
   },
   {
-    "uid": "dd8bccc4",
+    "uid": "cecb045f",
     "url": "https://smartstore.naver.com/euromarkt/products/10972096835",
     "brand": "",
     "qtys": [
@@ -3290,7 +3290,7 @@
     "status": "pending"
   },
   {
-    "uid": "eed60ec8",
+    "uid": "0f87d2e0",
     "url": "https://smartstore.naver.com/euromarkt/products/10972095581",
     "brand": "",
     "qtys": [
@@ -3325,7 +3325,7 @@
     "status": "pending"
   },
   {
-    "uid": "07824405",
+    "uid": "d38dd5a1",
     "url": "https://smartstore.naver.com/euromarkt/products/10972095221",
     "brand": "",
     "qtys": [
@@ -3360,7 +3360,7 @@
     "status": "pending"
   },
   {
-    "uid": "22f74ac8",
+    "uid": "3abdaec7",
     "url": "https://smartstore.naver.com/euromarkt/products/10972095144",
     "brand": "",
     "qtys": [
@@ -3395,7 +3395,7 @@
     "status": "pending"
   },
   {
-    "uid": "5f288426",
+    "uid": "55ecd5cd",
     "url": "https://smartstore.naver.com/euromarkt/products/10305549816",
     "brand": "",
     "qtys": [
@@ -3430,7 +3430,7 @@
     "status": "pending"
   },
   {
-    "uid": "26025ea9",
+    "uid": "fe7b343e",
     "url": "https://smartstore.naver.com/euromarkt/products/9474286609",
     "brand": "",
     "qtys": [
@@ -3465,7 +3465,7 @@
     "status": "pending"
   },
   {
-    "uid": "f68a8262",
+    "uid": "5e22bc6f",
     "url": "https://smartstore.naver.com/euromarkt/products/8670507666",
     "brand": "",
     "qtys": [
@@ -3500,7 +3500,7 @@
     "status": "pending"
   },
   {
-    "uid": "bf4cae4d",
+    "uid": "29fa1310",
     "url": "https://smartstore.naver.com/euromarkt/products/8670505995",
     "brand": "",
     "qtys": [
@@ -3535,7 +3535,7 @@
     "status": "pending"
   },
   {
-    "uid": "f35b68de",
+    "uid": "02ad43ae",
     "url": "https://smartstore.naver.com/euromarkt/products/8670503613",
     "brand": "",
     "qtys": [
@@ -3570,7 +3570,7 @@
     "status": "pending"
   },
   {
-    "uid": "9b8a0b33",
+    "uid": "308c6d11",
     "url": "https://smartstore.naver.com/euromarkt/products/8670501173",
     "brand": "",
     "qtys": [
@@ -3605,7 +3605,7 @@
     "status": "pending"
   },
   {
-    "uid": "f5d2685f",
+    "uid": "dc9f6c83",
     "url": "https://smartstore.naver.com/euromarkt/products/8670491759",
     "brand": "",
     "qtys": [
@@ -3640,7 +3640,7 @@
     "status": "pending"
   },
   {
-    "uid": "54dfaf32",
+    "uid": "b350ac3f",
     "url": "https://smartstore.naver.com/euromarkt/products/8670488358",
     "brand": "",
     "qtys": [
@@ -3675,7 +3675,7 @@
     "status": "pending"
   },
   {
-    "uid": "b0d97e25",
+    "uid": "f487f959",
     "url": "https://smartstore.naver.com/euromarkt/products/8670484206",
     "brand": "",
     "qtys": [
@@ -3710,7 +3710,7 @@
     "status": "pending"
   },
   {
-    "uid": "1b2ffd75",
+    "uid": "d4ecaad6",
     "url": "https://smartstore.naver.com/euromarkt/products/8670481545",
     "brand": "",
     "qtys": [
@@ -3745,7 +3745,7 @@
     "status": "pending"
   },
   {
-    "uid": "01051914",
+    "uid": "11483ba9",
     "url": "https://smartstore.naver.com/euromarkt/products/8670479212",
     "brand": "",
     "qtys": [
@@ -3780,7 +3780,7 @@
     "status": "pending"
   },
   {
-    "uid": "51f5636d",
+    "uid": "82df3bbb",
     "url": "https://smartstore.naver.com/euromarkt/products/8670475723",
     "brand": "",
     "qtys": [
