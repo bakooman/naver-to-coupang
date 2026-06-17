@@ -7399,28 +7399,43 @@ def page() -> None:
                                     new_value_mode=None,
                                 ).props("dense outlined clearable").style("min-width:200px")
                                 ui.icon("arrow_forward").classes("text-slate-400 self-center")
+                                _bulk_new_cat_lbl = ui.label("새 카테고리 미선택").classes("text-xs text-slate-400 self-center")
 
-                                # 새 카테고리: ui.select + with_input (기존 _open_cat_selector와 동일 방식)
-                                _flat_all = _get_wing_cat_flat()
-                                _flat_labels = [c["label"] for c in _flat_all]
+                                async def _open_new_cat_dlg():
+                                    _flat = _get_wing_cat_flat()
+                                    if not _flat:
+                                        ui.notify("카테고리 데이터 없음", type="negative")
+                                        return
+                                    with ui.dialog() as _cd, ui.card().style(
+                                        "min-width:520px;background:#1e293b;color:#f1f5f9;border:1px solid #334155"
+                                    ):
+                                        ui.label("변경할 카테고리 검색").classes("font-bold mb-3").style("color:#38bdf8")
 
-                                def _on_new_cat_select(e):
-                                    lbl = e.value or ""
-                                    item = next((c for c in _flat_all if c["label"] == lbl), None)
-                                    if item:
-                                        _bulk_new_cat["id"]   = item["code"]
-                                        _bulk_new_cat["name"] = item["label"]
+                                        def _on_sel(e):
+                                            lbl = e.value or ""
+                                            item = next((c for c in _flat if c["label"] == lbl), None)
+                                            if item:
+                                                _bulk_new_cat["id"]   = item["code"]
+                                                _bulk_new_cat["name"] = item["label"]
+                                                _bulk_new_cat_lbl.set_text(f"→ {item['name']} ({item['code']})")
+                                                _bulk_new_cat_lbl.classes(remove="text-slate-400", add="text-blue-600 font-semibold")
+                                                _cd.close()
 
-                                ui.select(
-                                    options=_flat_labels,
-                                    label="새 카테고리 검색",
-                                    on_change=_on_new_cat_select,
-                                    with_input=True,
-                                ).props(
-                                    "dense outlined use-input input-debounce=150 "
-                                    "hide-selected fill-input clearable "
-                                    "virtual-scroll-slice-size=20"
-                                ).style("min-width:280px")
+                                        ui.select(
+                                            options=[c["label"] for c in _flat],
+                                            label="카테고리명 검색 (예: 츄잉젤리, 샴푸, 영양제)",
+                                            on_change=_on_sel,
+                                            with_input=True,
+                                        ).props(
+                                            "dense outlined use-input input-debounce=200 "
+                                            "hide-selected fill-input dark "
+                                            "virtual-scroll-slice-size=20 popup-content-class=cat-popup"
+                                        ).classes("cat-search w-full")
+                                        ui.button("닫기", on_click=_cd.close).props("flat dense color=grey").classes("mt-2")
+                                    _cd.open()
+
+                                ui.button("카테고리 검색", icon="search", on_click=_open_new_cat_dlg).props("dense outline color=blue size=sm")
+                                _bulk_new_cat_lbl
 
                             # ── 적용 버튼 ──────────────────────────────────
                             with ui.row().classes("justify-end mt-2"):
