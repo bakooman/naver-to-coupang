@@ -1399,6 +1399,16 @@
       "category_id": "72929",
       "gosisi_cat": "가공식품",
       "priority": 14
+    },
+    "카라멜": {
+      "category_id": "73167",
+      "gosisi_cat": "가공식품 (식품위생법에 의한 가공식품)",
+      "priority": 14
+    },
+    "캐러멜": {
+      "category_id": "73167",
+      "gosisi_cat": "가공식품 (식품위생법에 의한 가공식품)",
+      "priority": 14
     }
   }
 }
