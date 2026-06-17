@@ -1930,7 +1930,12 @@ class WingAutomator:
                     await pg.goto(_page_url, wait_until="networkidle", timeout=20_000)
                 except Exception:
                     break
-                await asyncio.sleep(1.5)
+                # React SPA 렌더링 대기 + 스크롤로 지연 로딩 유도
+                await asyncio.sleep(2.5)
+                for _scroll_y in range(0, 3000, 600):
+                    await pg.evaluate(f"window.scrollTo(0, {_scroll_y})")
+                    await asyncio.sleep(0.3)
+                await asyncio.sleep(1.0)
                 _more_ids: list[str] = await pg.evaluate(_JS_COLLECT_IDS)
                 _new = [i for i in _more_ids if i not in _inv_set]
                 if not _new:
@@ -2978,17 +2983,19 @@ class WingAutomator:
                     """) or ""
 
                     if not _err_final:
-                        # 에러 없음 + 상태 변경 Cross-check
+                        # 에러 없음 + 상태/URL/API 201 Cross-check
                         _status_nopopup = await pg.evaluate(_JS_CHECK_STATUS) or ""
                         _url_nopopup = '/edit' not in pg.url and '/modify' not in pg.url
-                        log(f"[Wing 판매요청] 팝업없음 경로 — status={_status_nopopup or '미확인'} / URL변경={_url_nopopup}")
-                        if _status_nopopup or _url_nopopup:
+                        _api_201 = any(c.get("status") == 201 for c in api_calls)
+                        log(f"[Wing 판매요청] 팝업없음 경로 — status={_status_nopopup or '미확인'} / URL변경={_url_nopopup} / API201={_api_201}")
+                        if _status_nopopup or _url_nopopup or _api_201:
                             published += 1
                             if prod_name:
                                 published_names.append(prod_name)
-                            log(f"[Wing 판매요청] ✅ 등록 성공 (status={_status_nopopup or 'URL전환'}) ({inv_id})")
+                            _how = _status_nopopup or ('URL전환' if _url_nopopup else 'API201')
+                            log(f"[Wing 판매요청] ✅ 등록 성공 ({_how}) ({inv_id})")
                         else:
-                            log(f"[Wing 판매요청] ⚠️ 등록 불확실 — 에러 없으나 상태/URL 미변경 ({inv_id})")
+                            log(f"[Wing 판매요청] ⚠️ 등록 불확실 — 에러 없으나 상태/URL/API 미확인 ({inv_id})")
                             errors.append(f'등록불확실(상태미확인)({prod_name[:20] if prod_name else inv_id})')
                             await self._shot(f"bulk_uncertain_{inv_id}")
                     else:
