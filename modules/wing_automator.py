@@ -1908,7 +1908,41 @@ class WingAutomator:
         """)
 
         total = len(inv_ids)
-        log(f"[Wing 판매요청] 발견된 임시저장 상품 ID: {inv_ids} (총 {total}개)")
+        log(f"[Wing 판매요청] 발견된 임시저장 상품 ID (1페이지): {total}개")
+
+        # ── 페이지네이션: countPerPage=50이라 135개면 3페이지 필요 ──
+        if _draft_count and _draft_count > total:
+            _base_draft_url = pg.url
+            _inv_set = set(inv_ids)
+            _JS_COLLECT_IDS = """
+                () => {
+                    const links = Array.from(document.querySelectorAll('a[href*="vendor-inventory/modify"]'));
+                    const ids = links.map(a => { const m = a.href.match(/vendorInventoryId=(\\d+)/); return m?.[1]; }).filter(Boolean);
+                    return [...new Set(ids)];
+                }
+            """
+            import re as _re_pag
+            for _pn in range(2, 21):   # 최대 20페이지 (1000개 상한)
+                _page_url = _re_pag.sub(r'[&?]page=\d+', '', _base_draft_url)
+                _sep = '&' if '?' in _page_url else '?'
+                _page_url = _page_url + f'{_sep}page={_pn}'
+                try:
+                    await pg.goto(_page_url, wait_until="networkidle", timeout=20_000)
+                except Exception:
+                    break
+                await asyncio.sleep(1.5)
+                _more_ids: list[str] = await pg.evaluate(_JS_COLLECT_IDS)
+                _new = [i for i in _more_ids if i not in _inv_set]
+                if not _new:
+                    break
+                inv_ids.extend(_new)
+                _inv_set.update(_new)
+                log(f"[Wing 판매요청] 페이지 {_pn}: {len(_new)}개 추가 (누적 {len(inv_ids)}개)")
+                if len(inv_ids) >= _draft_count:
+                    break
+
+        total = len(inv_ids)
+        log(f"[Wing 판매요청] 임시저장 상품 ID 최종 수집: {total}개")
         if progress_cb:
             try: progress_cb(0, total)
             except Exception: pass
@@ -1980,15 +2014,32 @@ class WingAutomator:
                         (!body.includes('판매방식') && !body.includes('판매 방식')))
                         return null;
 
-                    // 1) 로켓그로스+판매방식 텍스트를 모두 포함하는 가장 작은(innermost) 컨테이너 탐색
+                    // 1) 실제 팝업/모달만 탐색 — 페이지 본문 섹션은 제외
+                    // 조건: role="dialog" 또는 position:fixed/absolute + z-index>=100
                     let rgBox = null;
-                    for (const el of document.querySelectorAll('div,section,article,dialog,[role="dialog"]')) {
+
+                    // role="dialog" 우선 탐색
+                    for (const el of document.querySelectorAll('[role="dialog"],[role="alertdialog"],dialog')) {
                         if (!el.offsetParent) continue;
                         const t = el.textContent || '';
                         if (!t.includes('로켓그로스')) continue;
                         if (!t.includes('판매방식') && !t.includes('판매 방식')) continue;
-                        // 더 작은(안쪽) 요소로 계속 교체
                         if (!rgBox || rgBox.contains(el)) rgBox = el;
+                    }
+                    // role 없으면 fixed/absolute + high-z 오버레이 탐색
+                    if (!rgBox) {
+                        for (const el of document.querySelectorAll('div,section,article')) {
+                            if (!el.offsetParent) continue;
+                            const cs = window.getComputedStyle(el);
+                            const pos = cs.position;
+                            const z = parseInt(cs.zIndex) || 0;
+                            if (pos !== 'fixed' && pos !== 'absolute') continue;
+                            if (z < 100) continue;
+                            const t = el.textContent || '';
+                            if (!t.includes('로켓그로스')) continue;
+                            if (!t.includes('판매방식') && !t.includes('판매 방식')) continue;
+                            if (!rgBox || rgBox.contains(el)) rgBox = el;
+                        }
                     }
                     if (!rgBox) return null;
 
@@ -2017,25 +2068,53 @@ class WingAutomator:
                         }
                     }
 
-                    // 3) 팝업 안 확인/닫기 버튼 좌표 (isFixed 체크 제거 — 팝업 자체가 fixed여도 OK)
+                    // 3) 팝업 안 확인/닫기 버튼 좌표 — 텍스트 폭넓게 매칭
                     let cfmCoord = null;
+                    let btnTexts = [];
+                    const SKIP_BTN = ['취소', '이전', '돌아가기', '닫기X'];
+                    // rgBox 안 모든 버튼 탐색
                     for (const btn of rgBox.querySelectorAll('button')) {
                         if (!btn.offsetParent) continue;
                         const t = btn.textContent.trim();
-                        if (t !== '확인' && t !== '닫기') continue;
+                        btnTexts.push(t);
+                        if (SKIP_BTN.includes(t)) continue;
+                        if (t === '닫기') continue;  // 닫기는 일단 제외 (팝업 닫기버튼)
                         const r = btn.getBoundingClientRect();
                         if (r.width > 0 && r.height > 0) {
                             cfmCoord = { x: r.left + r.width/2, y: r.top + r.height/2 };
                             break;
                         }
                     }
+                    // rgBox에서 못 찾으면 role=dialog / modal overlay 전체 탐색
+                    if (!cfmCoord) {
+                        for (const el of document.querySelectorAll('[role="dialog"],[class*="modal"],[class*="popup"],[class*="Modal"],[class*="Popup"]')) {
+                            if (!el.offsetParent) continue;
+                            if (!(el.textContent||'').includes('로켓그로스')) continue;
+                            for (const btn of el.querySelectorAll('button')) {
+                                if (!btn.offsetParent) continue;
+                                const t = btn.textContent.trim();
+                                if (SKIP_BTN.includes(t) || t === '닫기') continue;
+                                const r = btn.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0) {
+                                    cfmCoord = { x: r.left + r.width/2, y: r.top + r.height/2 };
+                                    btnTexts.push('[overlay]' + t);
+                                    break;
+                                }
+                            }
+                            if (cfmCoord) break;
+                        }
+                    }
 
                     return { selCoord, cfmCoord,
-                             debug: (rgBox.textContent||'').replace(/\s+/g,' ').substring(0,60) };
+                             debug: (rgBox.textContent||'').replace(/\s+/g,' ').substring(0,80),
+                             btnTexts: btnTexts.slice(0,8) };
                 }
             """
             _rg_coords = await pg.evaluate(_JS_RG_COORDS)
             if _rg_coords:
+                _rg_dbg = _rg_coords.get('debug', '')
+                _rg_btns = _rg_coords.get('btnTexts', [])
+                log(f"[Wing RG] 팝업 내용: {_rg_dbg} / 버튼목록: {_rg_btns}")
                 if _rg_coords.get('selCoord'):
                     await pg.mouse.click(_rg_coords['selCoord']['x'], _rg_coords['selCoord']['y'])
                     await asyncio.sleep(0.6)  # Vue 상태 업데이트 대기
@@ -2687,6 +2766,7 @@ class WingAutomator:
                 _rg_count = 0         # 로켓그로스 팝업 처리 횟수
                 _skip_item = False    # 이 상품 건너뜀 플래그
                 _registered_by_confirm = False  # 등록 확인 팝업 클릭 성공 여부
+                _rg_exceeded = False  # RG팝업 3회 반복 한도 초과 플래그
 
                 for _pw in range(15):   # 0.3s × 15 = 4.5초
                     await asyncio.sleep(0.3)
@@ -2790,9 +2870,9 @@ class WingAutomator:
                         break
                     if _rg_count > 0 and _rg_retry == 2:
                         log(f"[Wing 판매요청] ❌ 로켓그로스 팝업 3회 반복 한도 초과 ({inv_id})")
-                        errors.append(f'등록실패(RG팝업반복)({prod_name[:25]}): 판매방식선택후재등록불가')
-                        await self._shot(f"bulk_fail_{inv_id}")
+                        _rg_exceeded = True
                         _skip_item = True
+                        await self._shot(f"bulk_rg_exceeded_{inv_id}")
                         break
 
                 # ── 네트워크 로그 정리 ───────────────────────────────────
@@ -2820,7 +2900,16 @@ class WingAutomator:
                 """
                 log(f"[Wing 판매요청] 현재 URL: {pg.url[-80:]}")
                 if _skip_item:
-                    pass  # 에러로 이미 처리됨
+                    # RG 팝업 한도 초과라도 API 201 확인되면 실제 등록된 것 → 성공 처리
+                    if _rg_exceeded and any(c.get("status") == 201 for c in api_calls):
+                        published += 1
+                        if prod_name:
+                            published_names.append(prod_name)
+                        log(f"[Wing 판매요청] ✅ RG팝업 반복이나 API 201 확인 → 성공 처리 ({inv_id})")
+                    else:
+                        if _rg_exceeded:
+                            errors.append(f'등록실패(RG팝업반복)({prod_name[:25]}): 판매방식선택후재등록불가')
+                        # 그 외 에러는 이미 errors에 추가됨
                 elif _registered_by_confirm:
                     # 확인 팝업 클릭 후 최대 6초 대기 → 실제 Wing 상태 확인
                     _status_after = ""

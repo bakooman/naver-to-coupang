@@ -10301,31 +10301,43 @@ def page_price_fix() -> None:
             """가격변동알림 매칭 — 공백무시 핵심 문자열 비교."""
             alerts = [w for w in _pc.all_watches() if w.status in ("risen", "fallen")]
             ex_key = _key(excel_name)
+            # 상품명+옵션명 결합 키 (옵션에 식별 정보가 들어있는 경우 보완)
+            _combined = (str(excel_name).strip() + " " + str(option_name).strip()).strip()
+            ex_key2 = _key(_combined) if _combined != str(excel_name).strip() else ex_key
             if not ex_key:
                 return (None, 0.0)
-            ex_sorted = sorted(ex_key)   # 어순 무관 비교용
 
             best, best_score = None, 0.0
             for w in alerts:
                 al_key = _key(w.name or "")
                 if not al_key:
                     continue
-                if al_key == ex_key:
-                    score = 1.0
-                elif sorted(al_key) == ex_sorted:
-                    # 동일 문자 다른 어순 (예: '바디로션로즈' vs '로즈바디로션')
-                    score = 0.95
-                elif al_key in ex_key:
-                    # 알림명이 엑셀명의 부분집합 (긴 엑셀명 대비 짧은 알림명)
-                    score = len(al_key) / len(ex_key)
-                elif ex_key in al_key:
-                    score = len(ex_key) / len(al_key)
-                else:
-                    score = 0.0
+                score = 0.0
+                # 상품명만 / 상품명+옵션명 결합 — 둘 다 시도해서 최대 점수
+                for ek in ([ex_key] if ex_key2 == ex_key else [ex_key, ex_key2]):
+                    s = 0.0
+                    if al_key == ek:
+                        s = 1.0
+                    elif sorted(al_key) == sorted(ek):
+                        s = 0.95
+                    elif al_key in ek:
+                        s = len(al_key) / len(ek)
+                    elif ek in al_key:
+                        s = len(ek) / len(al_key)
+                    if s > score:
+                        score = s
+                # 키 기반 매칭 실패 시 토큰 오버랩 폴백
+                if score < 0.80:
+                    tok = max(
+                        _token_overlap(w.name or "", excel_name),
+                        _token_overlap(w.name or "", _combined),
+                    )
+                    if tok > score:
+                        score = tok
                 if score > best_score:
                     best_score = score
                     best = w
-            return (best, best_score) if best_score >= 0.80 else (None, 0.0)
+            return (best, best_score) if best_score >= 0.75 else (None, 0.0)
 
         async def _on_upload(e):
             nonlocal _raw_wb, dl_btn
