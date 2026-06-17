@@ -10238,7 +10238,6 @@ async def _on_startup():
 def page_price_fix() -> None:
     import re as _re
     import io as _io
-    import openpyxl as _opxl
     import tempfile as _tf2
     from pathlib import Path as _Path2
 
@@ -10246,9 +10245,48 @@ def page_price_fix() -> None:
 
     # 업로드된 엑셀 데이터 (행 단위)
     _rows: list[dict] = []        # [{name, option, qty, cur_price, alert, new_price, matched}]
-    _raw_wb = None                # openpyxl workbook
+    _raw_bytes: list = [None]     # 원본 파일 bytes (ZIP 직접 패치용)
     _fname_holder = {"v": ""}
     _meta = {"data_start_row": 4, "newprice_col": 16}  # Excel 1-indexed
+
+    def _patch_xlsx_prices(raw: bytes, row_price_map: dict, price_col: int) -> bytes:
+        """원본 xlsx/xlsm bytes를 ZIP 레벨에서 직접 패치 — openpyxl save() 사용 안 함."""
+        import zipfile, io as _io2, re as _re2
+
+        def _col_letter(n: int) -> str:
+            s = ""
+            while n > 0:
+                n, r = divmod(n - 1, 26)
+                s = chr(65 + r) + s
+            return s
+
+        col_letter = _col_letter(price_col)
+        targets = {f"{col_letter}{row}": price for row, price in row_price_map.items()}
+
+        src = _io2.BytesIO(raw)
+        dst = _io2.BytesIO()
+        with zipfile.ZipFile(src, "r") as zin:
+            with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for item in zin.infolist():
+                    data = zin.read(item.filename)
+                    if (item.filename.startswith("xl/worksheets/sheet")
+                            and item.filename.endswith(".xml")):
+                        text = data.decode("utf-8")
+                        for ref, new_price in targets.items():
+                            def _replacer(m, _p=new_price):
+                                inner = m.group(0)
+                                if "<v>" in inner:
+                                    inner = _re2.sub(r"<v>[^<]*</v>", f"<v>{_p}</v>", inner)
+                                else:
+                                    inner = inner[:-4] + f"<v>{_p}</v></c>"
+                                return inner
+                            pat = (r'<c\b[^>]*\br="'
+                                   + _re2.escape(ref)
+                                   + r'"[^>]*>(?:(?!</c>).)*</c>')
+                            text = _re2.sub(pat, _replacer, text, flags=_re2.DOTALL)
+                        data = text.encode("utf-8")
+                    zout.writestr(item, data)
+        return dst.getvalue()
 
     with ui.element("div").props("id=page-wrap"):
         _make_nav_header("price-fix")
@@ -10340,17 +10378,20 @@ def page_price_fix() -> None:
             return (best, best_score) if best_score >= 0.75 else (None, 0.0)
 
         async def _on_upload(e):
-            nonlocal _raw_wb, dl_btn
+            nonlocal dl_btn
 
             _fname = getattr(e.file, "name", None) or getattr(e, "name", "upload.xlsx")
             _fname_holder["v"] = _fname
 
             suffix = _Path2(_fname).suffix.lower() or ".xlsx"
-            tmp = _tf2.NamedTemporaryFile(delete=False, suffix=suffix)
             if hasattr(e, "file") and e.file is not None:
-                tmp.write(await e.file.read())
+                _file_bytes = await e.file.read()
             else:
-                tmp.write(e.content.read())
+                _file_bytes = e.content.read()
+            _raw_bytes[0] = _file_bytes   # 원본 보존 (ZIP 패치용)
+
+            tmp = _tf2.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(_file_bytes)
             tmp.close()
 
             try:
@@ -10364,7 +10405,6 @@ def page_price_fix() -> None:
             # 헤더는 row 2 (0-indexed), 데이터는 row 3+
             # 컬럼: 0=업체상품ID, 6=쿠팡노출명, 7=업체등록명, 8=옵션명, 9=판매가격
             _rows.clear()
-            _raw_wb = _opxl.load_workbook(tmp.name, keep_vba=True)
 
             # 헤더 행 탐지: 셀 값이 짧고 정확히 '업체상품 ID' / 'Product ID' 인 행
             # (row0 설명 텍스트는 수천 자 → 길이 제한으로 제외)
@@ -10515,33 +10555,31 @@ def page_price_fix() -> None:
                                     ui.element("td").classes(status_cls).text = status
 
         async def _download_excel():
-            if not _raw_wb or not _rows:
+            if not _raw_bytes[0] or not _rows:
                 ui.notify("먼저 엑셀을 업로드하세요.", color="negative")
                 return
 
-            ws = _raw_wb.active
             DATA_START_ROW = _meta["data_start_row"]
             PRICE_COL      = _meta["newprice_col"]
 
+            # ZIP 직접 패치 — openpyxl save() 없이 원본 구조 100% 보존
+            row_price_map = {}
             for i, r in enumerate(_rows):
                 if r["matched"] and r["new_price"]:
-                    excel_row = DATA_START_ROW + i
-                    ws.cell(row=excel_row, column=PRICE_COL, value=r["new_price"])
+                    row_price_map[DATA_START_ROW + i] = r["new_price"]
 
-            # 임시 파일로 저장 후 다운로드 — 원본 확장자(.xlsm) 유지
-            orig_ext = _Path2(_fname_holder["v"]).suffix.lower() or ".xlsx"
-            out_tmp = _tf2.NamedTemporaryFile(delete=False, suffix=orig_ext)
-            out_tmp.close()
-            _raw_wb.save(out_tmp.name)
+            try:
+                patched = _patch_xlsx_prices(_raw_bytes[0], row_price_map, PRICE_COL)
+            except Exception as ex:
+                ui.notify(f"❌ 파일 패치 실패: {ex}", color="negative")
+                return
 
+            orig_ext  = _Path2(_fname_holder["v"]).suffix.lower() or ".xlsx"
             orig_stem = _Path2(_fname_holder["v"]).stem
-            dl_name = f"{orig_stem}_가격수정{orig_ext}"
-
-            with open(out_tmp.name, "rb") as f:
-                data = f.read()
+            dl_name   = f"{orig_stem}_가격수정{orig_ext}"
 
             import base64 as _b64
-            b64 = _b64.b64encode(data).decode()
+            b64 = _b64.b64encode(patched).decode()
             _mime = (
                 "application/vnd.ms-excel.sheet.macroEnabled.12"
                 if orig_ext == ".xlsm"
@@ -10555,7 +10593,7 @@ def page_price_fix() -> None:
                 a.click();
                 document.body.removeChild(a);
             """)
-            ui.notify(f"✅ {dl_name} 다운로드 시작!", color="positive")
+            ui.notify(f"✅ {dl_name} 다운로드 시작! ({len(row_price_map)}개 가격 수정)", color="positive")
 
         # 업로드 컴포넌트
         with ui.card().classes("shadow-sm w-full mb-3"):
