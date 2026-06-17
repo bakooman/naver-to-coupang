@@ -7323,7 +7323,6 @@ def page() -> None:
                             ui.button("📥 엑셀 재생성", on_click=_regen_excel).props("color=indigo dense outline")
 
                     # ⑤ 일괄변경 패널
-                    # ── 헬퍼: 큐 브랜드/카테고리 목록 ─────────────────────
                     def _get_queue_brands():
                         return sorted(set(
                             (e.brand or "").strip()
@@ -7331,12 +7330,9 @@ def page() -> None:
                         ))
 
                     def _get_queue_cat_options():
-                        """큐에 있는 고유 카테고리를 {label: id} dict로 반환."""
+                        """큐의 고유 카테고리 {표시라벨: id} dict."""
                         _flat = _get_wing_cat_flat()
-                        _id_to_name = {
-                            str(c.get("code", "")): c.get("label") or c.get("name", "")
-                            for c in _flat
-                        }
+                        _id_to_name = {str(c.get("code","")): c.get("label") or c.get("name","") for c in _flat}
                         seen, result = set(), {}
                         for _e in _global_queue:
                             cid = (_e.category_id or "").strip()
@@ -7344,13 +7340,36 @@ def page() -> None:
                                 seen.add(cid)
                                 cname = _id_to_name.get(cid, cid)
                                 result[f"{cname}  ({cid})"] = cid
-                        return result  # {표시라벨: category_id}
+                        return result
+
+                    def _parse_num_range(s: str) -> set:
+                        """'1,3,5-8' → {1,3,5,6,7,8}. 빈 문자열 → 빈 set (전체)."""
+                        result = set()
+                        for part in s.replace(" ", "").split(","):
+                            if not part:
+                                continue
+                            if "-" in part:
+                                a, _, b = part.partition("-")
+                                try: result.update(range(int(a), int(b)+1))
+                                except ValueError: pass
+                            else:
+                                try: result.add(int(part))
+                                except ValueError: pass
+                        return result
 
                     with ui.card().classes("w-full shadow-sm mb-1").style("background:#f8fafc"):
                         with ui.card_section().classes("py-2"):
                             with ui.row().classes("items-center justify-between mb-2"):
                                 ui.label("일괄변경").classes("text-xs font-bold text-slate-500")
                                 ui.label("수집 중·완료 모두 적용").classes("text-xs text-slate-400")
+
+                            # ── 번호 선택 행 ───────────────────────────────
+                            with ui.row().classes("items-center gap-2 mb-2"):
+                                ui.label("번호").classes("text-xs text-slate-500 font-semibold").style("min-width:44px")
+                                _bulk_num_inp = ui.input(
+                                    placeholder="예: 9  /  1,3,5-8  /  빈칸=전체"
+                                ).props("dense outlined clearable").style("min-width:240px")
+                                ui.label("(큐 번호 기준, 빈칸이면 브랜드·카테고리 조건으로 전체 적용)").classes("text-xs text-slate-400")
 
                             # ── 브랜드 행 ──────────────────────────────────
                             with ui.row().classes("items-end gap-2 flex-wrap mb-2"):
@@ -7365,79 +7384,74 @@ def page() -> None:
                                 ).props("dense outlined clearable").style("min-width:160px")
 
                             # ── 카테고리 행 ────────────────────────────────
-                            _bulk_cat_opts = {"opts": _get_queue_cat_options()}  # {label: id}
+                            _bulk_cat_opts = {"opts": _get_queue_cat_options()}
+                            _bulk_new_cat  = {"id": "", "name": ""}
                             with ui.row().classes("items-end gap-2 flex-wrap"):
                                 ui.label("카테고리").classes("text-xs text-slate-500 self-center font-semibold").style("min-width:44px")
                                 _bulk_old_cat_sel = ui.select(
                                     options=list(_bulk_cat_opts["opts"].keys()),
                                     label="현재 카테고리",
                                     new_value_mode=None,
-                                ).props("dense outlined clearable").style("min-width:220px")
+                                ).props("dense outlined clearable").style("min-width:200px")
                                 ui.icon("arrow_forward").classes("text-slate-400 self-center")
-                                _bulk_new_cat = {"id": "", "name": ""}
-                                _bulk_new_cat_lbl = ui.label("새 카테고리 미선택").classes("text-xs text-slate-400 self-center")
 
-                                async def _open_bulk_new_cat_search():
-                                    _flat = _get_wing_cat_flat()
-                                    if not _flat:
-                                        ui.notify("카테고리 데이터 없음", type="negative")
-                                        return
-                                    with ui.dialog() as _cd, ui.card().style("min-width:440px"):
-                                        ui.label("변경할 카테고리 검색").classes("font-bold mb-2")
-                                        _cs_inp = ui.input(placeholder="카테고리명 입력").props("dense outlined autofocus").style("width:100%")
-                                        _cs_res = ui.column().classes("gap-1 max-h-64 overflow-y-auto w-full mt-1")
-                                        def _cs_search(v=""):
-                                            kw = (v or _cs_inp.value or "").strip().lower()
-                                            _cs_res.clear()
-                                            with _cs_res:
-                                                hits = [c for c in _flat if kw in (c.get("label","") + c.get("name","")).lower()] if kw else _flat[:50]
-                                                for c in hits[:60]:
-                                                    cname = c.get("label") or c.get("name","")
-                                                    cid   = str(c.get("code",""))
-                                                    def _pick(cid=cid, cname=cname):
-                                                        _bulk_new_cat["id"]   = cid
-                                                        _bulk_new_cat["name"] = cname
-                                                        _bulk_new_cat_lbl.set_text(f"→ {cname} ({cid})")
-                                                        _bulk_new_cat_lbl.classes(remove="text-slate-400", add="text-blue-600 font-semibold")
-                                                        _cd.close()
-                                                    ui.button(f"{cname}  ({cid})", on_click=_pick).props("flat dense align=left").style("width:100%;font-size:12px")
-                                        _cs_inp.on("input", lambda e: _cs_search(e.value))
-                                        _cs_search()
-                                        ui.button("닫기", on_click=_cd.close).props("flat dense color=grey").classes("mt-1")
-                                    _cd.open()
+                                # 새 카테고리: ui.select + with_input (기존 _open_cat_selector와 동일 방식)
+                                _flat_all = _get_wing_cat_flat()
+                                _flat_labels = [c["label"] for c in _flat_all]
 
-                                ui.button("카테고리 검색", icon="search", on_click=_open_bulk_new_cat_search).props("dense outline color=blue size=sm")
-                                _bulk_new_cat_lbl
+                                def _on_new_cat_select(e):
+                                    lbl = e.value or ""
+                                    item = next((c for c in _flat_all if c["label"] == lbl), None)
+                                    if item:
+                                        _bulk_new_cat["id"]   = item["code"]
+                                        _bulk_new_cat["name"] = item["label"]
+
+                                ui.select(
+                                    options=_flat_labels,
+                                    label="새 카테고리 검색",
+                                    on_change=_on_new_cat_select,
+                                    with_input=True,
+                                ).props(
+                                    "dense outlined use-input input-debounce=150 "
+                                    "hide-selected fill-input clearable "
+                                    "virtual-scroll-slice-size=20"
+                                ).style("min-width:280px")
 
                             # ── 적용 버튼 ──────────────────────────────────
                             with ui.row().classes("justify-end mt-2"):
                                 async def _apply_bulk_change():
+                                    num_str  = (_bulk_num_inp.value or "").strip()
+                                    num_set  = _parse_num_range(num_str)  # 빈 set = 전체
                                     old_b    = (_bulk_old_brand.value or "").strip()
                                     new_b    = (_bulk_new_brand.value or "").strip()
-                                    old_c_lbl = (_bulk_old_cat_sel.value or "").strip()
+                                    old_c_lbl= (_bulk_old_cat_sel.value or "").strip()
                                     old_cid  = _bulk_cat_opts["opts"].get(old_c_lbl, "")
                                     new_cid  = _bulk_new_cat["id"]
                                     new_cname= _bulk_new_cat["name"]
 
                                     if not new_b and not new_cid:
-                                        ui.notify("새 브랜드명 또는 카테고리를 입력하세요", type="warning")
+                                        ui.notify("새 브랜드명 또는 카테고리를 선택하세요", type="warning")
                                         return
                                     if not _global_queue:
                                         ui.notify("큐가 비어있습니다", type="warning")
                                         return
 
                                     cnt = 0
-                                    for _e in _global_queue:
-                                        brand_match = (not old_b) or ((_e.brand or "").strip().upper() == old_b.upper())
-                                        cat_match   = (not old_cid) or ((_e.category_id or "").strip() == old_cid)
-                                        # 둘 다 지정된 경우 OR 조건 (어느 하나라도 해당하면 변경)
-                                        if old_b and old_cid:
-                                            if not brand_match and not cat_match:
+                                    for _qi, _e in enumerate(_global_queue, 1):
+                                        # ① 번호 필터 (지정된 경우)
+                                        if num_set and _qi not in num_set:
+                                            continue
+                                        # ② 번호 미지정 시 브랜드·카테고리 조건 적용
+                                        if not num_set:
+                                            b_match = (not old_b) or ((_e.brand or "").strip().upper() == old_b.upper())
+                                            c_match = (not old_cid) or ((_e.category_id or "").strip() == old_cid)
+                                            if old_b and old_cid:
+                                                if not b_match and not c_match:
+                                                    continue
+                                            elif old_b and not b_match:
                                                 continue
-                                        elif old_b and not brand_match:
-                                            continue
-                                        elif old_cid and not cat_match:
-                                            continue
+                                            elif old_cid and not c_match:
+                                                continue
 
                                         if new_b:
                                             _e.brand = new_b
@@ -7459,15 +7473,15 @@ def page() -> None:
                                         _save_brand_map(_bmap)
 
                                     parts = [f"{cnt}개 항목 변경"]
-                                    if new_b:    parts.append(f"브랜드 → {new_b}")
-                                    if new_cname: parts.append(f"카테고리 → {new_cname}")
+                                    if num_str: parts.append(f"번호: {num_str}")
+                                    if new_b:   parts.append(f"브랜드 → {new_b}")
+                                    if new_cname: parts.append(f"카테고리 → {new_cname.split(' > ')[-1]}")
                                     ui.notify(" | ".join(parts), type="positive", timeout=4000)
 
+                                    _bulk_num_inp.set_value("")
                                     _bulk_new_brand.set_value("")
                                     _bulk_new_cat["id"] = ""
                                     _bulk_new_cat["name"] = ""
-                                    _bulk_new_cat_lbl.set_text("새 카테고리 미선택")
-                                    _bulk_new_cat_lbl.classes(remove="text-blue-600 font-semibold", add="text-slate-400")
                                     _render_queue()
 
                                 ui.button("일괄변경 적용", icon="check", on_click=_apply_bulk_change).props("color=primary size=sm")
