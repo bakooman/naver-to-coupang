@@ -2061,8 +2061,8 @@ async def _process_entry(
                     f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
                     "이 상품에 맞는 쿠팡 Wing 카테고리 소분류 명칭을 1~3개 답하세요.\n\n"
                     "⚠️ 필수 분류 규칙:\n"
-                    "1. 식품 젤리(캔디/구미/젤리빈/하리보 등) → 반드시 '캔디/젤리' 또는 '사탕' 카테고리."
-                    " 절대 '젤리/우레탄밴드', '젤리슈즈', '젤리시계' 등 비식품 카테고리 금지.\n"
+                    "1. 식품 젤리(캔디/구미/젤리빈/하리보 등) → 반드시 '츄잉젤리' 또는 '사탕' 카테고리."
+                    " 절대 '캔디/젤리'(강아지간식), '젤리/우레탄밴드', '젤리슈즈' 등 비식품/반려동물 카테고리 금지.\n"
                     "2. 상품명/네이버카테고리에 강아지/고양이/소형견/대형견/"
                     "반려견/반려묘/펫/pet 등 반려동물 키워드가 있으면\n"
                     "   절대 사람용 건강기능식품/비타민/영양제 카테고리 선택 금지."
@@ -4161,6 +4161,56 @@ html, body {
 }
 .topbar .q-btn.topbar-restart .q-btn__content { color: rgba(255,255,255,0.6) !important; }
 .topbar .q-btn.topbar-restart:hover .q-btn__content { color: #fff !important; }
+/* 재시작 — 빨간 계열 강조 */
+.topbar .q-btn.topbar-restart,
+.topbar .q-btn.topbar-restart:before {
+  border-color: rgba(248,113,113,0.35) !important;
+  background: rgba(239,68,68,0.12) !important;
+  background-color: rgba(239,68,68,0.12) !important;
+}
+.topbar .q-btn.topbar-restart:hover,
+.topbar .q-btn.topbar-restart:hover:before {
+  background: rgba(239,68,68,0.22) !important;
+  background-color: rgba(239,68,68,0.22) !important;
+  border-color: rgba(248,113,113,0.6) !important;
+}
+.topbar .q-btn.topbar-restart .q-btn__content { color: #fca5a5 !important; }
+.topbar .q-btn.topbar-restart:hover .q-btn__content { color: #fff !important; }
+/* 등록 자동화 — 보라 (기본 nav-btn과 동일하지만 active 시 강조 색 다르게) */
+.topbar .q-btn.nav-btn-home.active,
+.topbar .q-btn.nav-btn-home.active:before {
+  background: linear-gradient(135deg, #7c3aed, #4f46e5) !important;
+  background-color: #7c3aed !important;
+  box-shadow: 0 0 14px rgba(124,58,237,0.5) !important;
+}
+/* 가격변동알림 — 주황 계열 */
+.topbar .q-btn.nav-btn-alert:not(.active):hover,
+.topbar .q-btn.nav-btn-alert:not(.active):hover:before {
+  background: rgba(251,146,60,0.15) !important;
+  background-color: rgba(251,146,60,0.15) !important;
+  border-color: rgba(251,146,60,0.4) !important;
+}
+.topbar .q-btn.nav-btn-alert:not(.active):hover .q-btn__content { color: #fb923c !important; }
+.topbar .q-btn.nav-btn-alert.active,
+.topbar .q-btn.nav-btn-alert.active:before {
+  background: linear-gradient(135deg, #ea580c, #f59e0b) !important;
+  background-color: #ea580c !important;
+  box-shadow: 0 0 14px rgba(234,88,12,0.5) !important;
+}
+/* 엑셀수정 — 초록 계열 */
+.topbar .q-btn.nav-btn-excel:not(.active):hover,
+.topbar .q-btn.nav-btn-excel:not(.active):hover:before {
+  background: rgba(34,197,94,0.15) !important;
+  background-color: rgba(34,197,94,0.15) !important;
+  border-color: rgba(34,197,94,0.4) !important;
+}
+.topbar .q-btn.nav-btn-excel:not(.active):hover .q-btn__content { color: #4ade80 !important; }
+.topbar .q-btn.nav-btn-excel.active,
+.topbar .q-btn.nav-btn-excel.active:before {
+  background: linear-gradient(135deg, #16a34a, #15803d) !important;
+  background-color: #16a34a !important;
+  box-shadow: 0 0 14px rgba(22,163,74,0.5) !important;
+}
 
 /* ══════════════════════════════════════════
    메인 콘텐츠 영역
@@ -4463,10 +4513,10 @@ def _make_nav_header(current: str):
         ui.html('<div class="topbar-logo">🛒 <span>네이버 → 쿠팡</span></div>')
 
         # 네비 버튼
-        home_cls = "nav-btn active" if current == "main" else "nav-btn"
+        home_cls = "nav-btn nav-btn-home active" if current == "main" else "nav-btn nav-btn-home"
         ui.button("📦 등록 자동화", on_click=lambda: ui.navigate.to("/")).classes(home_cls)
 
-        mon_cls = "nav-btn active" if current == "monitor" else "nav-btn"
+        mon_cls = "nav-btn nav-btn-alert active" if current == "monitor" else "nav-btn nav-btn-alert"
         if has_any:
             mon_cls += " nav-alert-blink"
         alert_label = "🔔 가격변동알림"
@@ -4476,8 +4526,8 @@ def _make_nav_header(current: str):
         if restocked_n: alert_label += f" 🟢{restocked_n}"
         ui.button(alert_label, on_click=lambda: ui.navigate.to("/monitor")).classes(mon_cls)
 
-        fix_cls = "nav-btn active" if current == "error-fix" else "nav-btn"
-        ui.button("🔧 오류수정", on_click=lambda: ui.navigate.to("/error-fix")).classes(fix_cls)
+        fix_cls = "nav-btn nav-btn-excel active" if current == "error-fix" else "nav-btn nav-btn-excel"
+        ui.button("📗 엑셀수정", on_click=lambda: ui.navigate.to("/error-fix")).classes(fix_cls)
 
         ui.html('<div class="nav-spacer"></div>')
 
@@ -8108,22 +8158,30 @@ def page() -> None:
                                         + (f"  ({entry.dup_matched_date})" if entry.dup_matched_date else "")
                                     ).classes("text-xs text-slate-500 ml-4 font-mono")
 
-                        # done/error: 카테고리 감지 결과 표시
-                        if entry.status in ("done", "error") and entry.detected_keyword:
+                        # done/error: 카테고리 감지 결과 표시 (이름으로 표시)
+                        if entry.status in ("done", "error") and (entry.detected_keyword or entry.category_id):
+                            # category_id → 카테고리명 조회
+                            _cat_display_name = ""
+                            if entry.category_id:
+                                _flat = _get_wing_cat_flat()
+                                for _wc in _flat:
+                                    if _wc.get("code") == entry.category_id:
+                                        _cat_display_name = _wc.get("name", "")
+                                        break
+                            if not _cat_display_name:
+                                _cat_display_name = entry.category_id or "미설정"
+
                             if entry.category_is_manual:
                                 kw_color = "blue"
-                                _manual_name = entry.detected_keyword.removeprefix("[수동입력]")
                                 kw_text = (
-                                    f"수동입력 카테고리: {_manual_name} | "
-                                    f"ID: {entry.category_id} | "
-                                    f"{entry.gosisi_cat[:18]}..."
+                                    f"수동입력 카테고리: {_cat_display_name} | "
+                                    f"{entry.gosisi_cat[:15]}"
                                 )
                             else:
                                 kw_color = "teal" if entry.category_id else "orange"
                                 kw_text  = (
-                                    f"키워드: {entry.detected_keyword} | "
-                                    f"ID: {entry.category_id or '미설정'} | "
-                                    f"{entry.gosisi_cat[:18]}..."
+                                    f"수동입력 카테고리: {_cat_display_name}" if entry.category_is_manual else
+                                    f"카테고리: {_cat_display_name} | {entry.gosisi_cat[:15]}"
                                 )
                             ui.label(kw_text).classes(
                                 f"text-xs text-{kw_color}-600 font-mono mt-1"
@@ -8387,18 +8445,38 @@ def page() -> None:
                                         )
                                         def _make_cat_manual_edit(e_ref=entry):
                                             _cur_id = e_ref.category_id or ""
+                                            # 현재 카테고리 이름 조회
+                                            _cur_cat_name = ""
+                                            if _cur_id:
+                                                for _wc in _get_wing_cat_flat():
+                                                    if _wc.get("code") == _cur_id:
+                                                        _cur_cat_name = _wc.get("name", "")
+                                                        break
                                             _cat_id_inp = ui.input(
                                                 value=_cur_id,
                                                 placeholder="카테고리 ID (예: 58832)",
                                             ).props("dense outlined").style("width:140px").tooltip(
-                                                f"현재: {_cur_id or '미설정'}"
+                                                f"현재: {_cur_cat_name or _cur_id or '미설정'}"
                                             )
+                                            # 카테고리명 표시 라벨 (ID 옆에 이름 표시)
+                                            _cat_name_lbl = ui.label(
+                                                _cur_cat_name or ("미설정" if not _cur_id else _cur_id)
+                                            ).classes("text-xs text-teal-400 font-medium")
+
                                             async def _h(ev=None):
                                                 v = (_cat_id_inp.value or "").strip()
                                                 e_ref.category_id = v
                                                 e_ref.category_is_manual = bool(v)
                                                 if e_ref.result_item:
                                                     e_ref.result_item.category_id = v
+                                                # 카테고리명 즉시 갱신
+                                                _new_name = ""
+                                                if v:
+                                                    for _wc in _get_wing_cat_flat():
+                                                        if _wc.get("code") == v:
+                                                            _new_name = _wc.get("name", "")
+                                                            break
+                                                _cat_name_lbl.set_text(_new_name or (v if v else "미설정"))
                                                 # 큐 전체 카테고리 전파: ① 같은 브랜드 항목, ② 같은 source_file의 pending 항목
                                                 _prop_count = 0
                                                 _cur_brand = (e_ref.brand or "").strip()
@@ -8424,10 +8502,11 @@ def page() -> None:
                                                                 _pe.result_item.category_id = v
                                                             _prop_count += 1
                                                 if v:
+                                                    _notify_name = _new_name or v
                                                     if _prop_count:
-                                                        ui.notify(f"카테고리 ID 저장: {v}  (큐 {_prop_count}개 전파)", type="positive", timeout=2500)
+                                                        ui.notify(f"카테고리 저장: {_notify_name}  (큐 {_prop_count}개 전파)", type="positive", timeout=2500)
                                                     else:
-                                                        ui.notify(f"카테고리 ID 저장: {v}", type="positive", timeout=1500)
+                                                        ui.notify(f"카테고리 저장: {_notify_name}", type="positive", timeout=1500)
                                                 _render_queue()
                                                 if v:
                                                     try:
