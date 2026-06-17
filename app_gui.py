@@ -4463,6 +4463,9 @@ def _make_nav_header(current: str):
         if restocked_n: alert_label += f" 🟢{restocked_n}"
         ui.button(alert_label, on_click=lambda: ui.navigate.to("/monitor")).classes(mon_cls)
 
+        fix_cls = "nav-btn active" if current == "error-fix" else "nav-btn"
+        ui.button("🔧 오류수정", on_click=lambda: ui.navigate.to("/error-fix")).classes(fix_cls)
+
         ui.html('<div class="nav-spacer"></div>')
 
         ui.button("🔄 재시작", on_click=_restart_app).classes("topbar-restart")
@@ -5822,6 +5825,310 @@ def _build_detail_page_tab(settings) -> None:
             dp_upload_btn.props(remove="disabled loading")
 
     dp_upload_btn.on_click(_on_r2_upload)
+
+
+# ── 오류 엑셀 수정 페이지 ────────────────────────────────────────
+
+@ui.page("/error-fix")
+async def page_error_fix() -> None:
+    _add_common_head()
+
+    # ── 페이지 로컬 상태 ─────────────────────────────────────────
+    _st: dict = {
+        "src_path":    None,   # 업로드된 임시 파일 경로
+        "col_map":     None,   # 열 인덱스 매핑
+        "src_ext":     ".xlsx",
+        "header_row":  2,
+        "products":    [],     # parse_excel 결과
+        "fix_results": [],     # list[FixResult]
+        "processing":  False,
+    }
+
+    with ui.element("div").props("id=page-wrap"):
+        _make_nav_header("error-fix")
+        ui.separator()
+
+        with ui.element("div").classes("p-4 max-w-6xl mx-auto w-full"):
+            ui.label("🔧 오류 엑셀 수정").classes("text-2xl font-bold text-slate-800 mb-1")
+            ui.label(
+                "Wing 일괄등록 엑셀 파일을 업로드하면 Gemini가 카테고리·브랜드 오매핑을 자동 감지하고 수정합니다."
+            ).classes("text-sm text-slate-500 mb-4")
+
+            # ── ① 파일 업로드 ─────────────────────────────────
+            with ui.card().classes("shadow-sm w-full mb-4"):
+                with ui.card_section():
+                    ui.label("① 파일 업로드").classes("font-bold text-slate-700 text-sm mb-2")
+                    file_label = ui.label("선택된 파일 없음").classes("text-xs text-slate-400 mb-2 block")
+
+                    async def _on_upload(e):
+                        import tempfile as _tf
+                        suffix = Path(e.name).suffix.lower() or ".xlsx"
+                        tmp = _tf.NamedTemporaryFile(
+                            delete=False, suffix=suffix, dir=str(_OUTPUT_ROOT)
+                        )
+                        tmp.write(e.content.read())
+                        tmp.close()
+                        src_path = Path(tmp.name)
+                        try:
+                            from modules.excel_fixer import parse_excel
+                            loop = asyncio.get_running_loop()
+                            col_map, src_ext, products, header_row = await loop.run_in_executor(
+                                None, lambda: parse_excel(src_path)
+                            )
+                            _st.update(
+                                src_path=src_path, col_map=col_map, src_ext=src_ext,
+                                header_row=header_row, products=products,
+                                fix_results=[],
+                            )
+                            file_label.set_text(f"✅ {e.name} — {len(products)}개 고유 상품 감지")
+                            file_label.classes(remove="text-slate-400 text-red-500")
+                            file_label.classes(add="text-green-600 font-semibold")
+                            start_btn.set_enabled(True)
+                        except Exception as ex:
+                            file_label.set_text(f"❌ {ex}")
+                            file_label.classes(remove="text-slate-400 text-green-600")
+                            file_label.classes(add="text-red-500")
+                            start_btn.set_enabled(False)
+                        results_area.clear()
+                        dl_btn.set_enabled(False)
+
+                    ui.upload(
+                        label="📁 .xlsx / .xlsm 선택",
+                        on_upload=_on_upload,
+                        auto_upload=True,
+                        multiple=False,
+                    ).props("accept=.xlsx,.xlsm,.xls flat dense color=primary")
+
+            # ── ② Gemini 검수 ─────────────────────────────────
+            with ui.card().classes("shadow-sm w-full mb-4"):
+                with ui.card_section():
+                    ui.label("② Gemini 검수 실행").classes("font-bold text-slate-700 text-sm mb-2")
+
+                    prog_label = ui.label("").classes("text-xs text-slate-500 mb-1 block")
+                    prog_bar   = ui.linear_progress(value=0).props("color=primary instant-feedback")
+                    prog_bar.set_visibility(False)
+
+                    async def _on_start():
+                        if not _st.get("src_path") or _st["processing"]:
+                            return
+                        products = _st.get("products", [])
+                        if not products:
+                            ui.notify("상품 데이터가 없습니다.", type="warning")
+                            return
+
+                        _st["processing"] = True
+                        start_btn.set_enabled(False)
+                        start_btn.set_text("⏳ 검수 중...")
+                        results_area.clear()
+                        dl_btn.set_enabled(False)
+                        prog_bar.set_visibility(True)
+                        prog_bar.set_value(0)
+                        prog_label.set_text("분석 시작...")
+
+                        from modules.excel_fixer import gemini_check, FixResult
+                        _det     = _get_detector()
+                        _api_key = getattr(_settings, "GEMINI_API_KEY", "")
+                        _model   = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
+                        loop     = asyncio.get_running_loop()
+                        total    = len(products)
+                        fix_results: list[FixResult] = []
+
+                        for i, prod in enumerate(products):
+                            prod["_cat_name"] = _det.get_name_by_id(prod["category_id"])
+                            prog_label.set_text(
+                                f"[{i+1}/{total}] {prod['product_name'][:45]}"
+                            )
+
+                            if _api_key:
+                                g = await loop.run_in_executor(
+                                    None,
+                                    lambda p=dict(prod): gemini_check(p, _api_key, _model),
+                                )
+                            else:
+                                g = {"needs_fix": False, "category_keyword": "",
+                                     "brand": prod["brand"], "reason": "GEMINI_API_KEY 미설정"}
+
+                            new_cat_id   = prod["category_id"]
+                            new_cat_name = prod["_cat_name"]
+                            new_gosisi   = ""
+
+                            if g.get("needs_fix") and g.get("category_keyword"):
+                                found = _det.search_by_keyword(g["category_keyword"])
+                                if found:
+                                    new_cat_id, new_gosisi, new_cat_name = found
+
+                            raw_new_brand = (g.get("brand") or prod["brand"]).strip()
+                            new_brand     = raw_new_brand if raw_new_brand else prod["brand"]
+                            cat_chg       = new_cat_id != prod["category_id"]
+                            brand_chg     = new_brand.lower() != (prod["brand"] or "").lower()
+                            needs_fix     = g.get("needs_fix", False) or cat_chg or brand_chg
+
+                            fix_results.append(FixResult(
+                                product_name      = prod["product_name"],
+                                old_category_id   = prod["category_id"],
+                                old_category_name = prod["_cat_name"],
+                                new_category_id   = new_cat_id,
+                                new_category_name = new_cat_name,
+                                new_gosisi_cat    = new_gosisi,
+                                old_brand         = prod["brand"],
+                                new_brand         = new_brand,
+                                needs_fix         = needs_fix,
+                                reason            = g.get("reason", ""),
+                                row_indices       = prod["row_indices"],
+                            ))
+                            prog_bar.set_value((i + 1) / total)
+
+                        _st["fix_results"] = fix_results
+                        _st["processing"]  = False
+                        changed_cnt = sum(1 for fr in fix_results if fr.needs_fix)
+                        prog_label.set_text(
+                            f"완료 — 전체 {total}개 중 {changed_cnt}개 수정 필요"
+                        )
+                        start_btn.set_enabled(True)
+                        start_btn.set_text("🔍 검수 시작")
+                        _render_results(fix_results)
+                        if fix_results:
+                            dl_btn.set_enabled(True)
+
+                    start_btn = ui.button(
+                        "🔍 검수 시작", icon="search", on_click=_on_start
+                    ).props("color=primary").classes("mt-2")
+                    start_btn.set_enabled(False)
+
+            # ── ③ 변경 사항 미리보기 ─────────────────────────
+            with ui.card().classes("shadow-sm w-full mb-4"):
+                with ui.card_section():
+                    with ui.row().classes("items-center justify-between mb-2"):
+                        ui.label("③ 변경 사항 미리보기").classes("font-bold text-slate-700 text-sm")
+                        ui.label("브랜드 락 ON → 해당 브랜드 변경 차단").classes("text-xs text-slate-400")
+
+                    # 테이블 헤더
+                    with ui.row().classes(
+                        "w-full bg-slate-100 rounded px-2 py-1 gap-2 text-xs font-bold text-slate-600"
+                    ):
+                        ui.label("상품명").style("flex:2; min-width:0")
+                        ui.label("카테고리 변경 (ID / 카테고리명)").style("flex:2; min-width:0")
+                        ui.label("브랜드 변경").style("flex:1; min-width:0")
+                        ui.label("이유").style("flex:1; min-width:0")
+                        ui.label("브랜드 락").classes("w-20 text-center")
+
+                    results_area = ui.column().classes("w-full gap-0")
+
+            # ── ④ 다운로드 ─────────────────────────────────────
+            with ui.card().classes("shadow-sm w-full"):
+                with ui.card_section():
+                    ui.label("④ 수정 엑셀 다운로드").classes("font-bold text-slate-700 text-sm mb-2")
+                    ui.label(
+                        "수정 사항이 적용된 새 엑셀을 저장합니다. 브랜드 락이 ON인 항목은 브랜드 변경이 차단됩니다."
+                    ).classes("text-xs text-slate-400 mb-2")
+
+                    async def _on_download():
+                        if not _st.get("src_path") or not _st.get("fix_results"):
+                            ui.notify("먼저 검수를 실행하세요.", type="warning")
+                            return
+                        from modules.excel_fixer import apply_and_save
+                        dl_btn.set_enabled(False)
+                        dl_btn.set_text("⏳ 저장 중...")
+                        try:
+                            loop = asyncio.get_running_loop()
+                            out_path = await loop.run_in_executor(
+                                None,
+                                lambda: apply_and_save(
+                                    _st["src_path"],
+                                    _st["col_map"],
+                                    _st["fix_results"],
+                                    _OUTPUT_ROOT,
+                                    _st.get("src_ext", ".xlsx"),
+                                ),
+                            )
+                            ui.notify(f"✅ 저장 완료: {out_path.name}", type="positive")
+                            ui.download(str(out_path))
+                        except Exception as ex:
+                            ui.notify(f"❌ 저장 오류: {ex}", type="negative")
+                        finally:
+                            dl_btn.set_enabled(True)
+                            dl_btn.set_text("⬇ 수정 엑셀 다운로드")
+
+                    dl_btn = ui.button(
+                        "⬇ 수정 엑셀 다운로드", icon="download", on_click=_on_download
+                    ).props("color=green")
+                    dl_btn.set_enabled(False)
+
+    # ── 결과 렌더링 함수 ───────────────────────────────────────────
+    def _render_results(fix_results: list) -> None:
+        from modules.excel_fixer import FixResult
+        results_area.clear()
+        if not fix_results:
+            with results_area:
+                ui.label("검수 결과 없음").classes("text-sm text-slate-400 p-2")
+            return
+
+        changed_cnt = sum(1 for fr in fix_results if fr.needs_fix)
+        with results_area:
+            if changed_cnt:
+                ui.label(
+                    f"⚠️ 수정 필요 {changed_cnt}개 / 정상 {len(fix_results) - changed_cnt}개"
+                ).classes("text-xs font-bold text-amber-600 px-2 py-1")
+            else:
+                ui.label("✅ 모든 상품 카테고리·브랜드 정상").classes(
+                    "text-xs font-bold text-green-600 px-2 py-1"
+                )
+
+            for fr in fix_results:
+                cat_chg   = fr.new_category_id != fr.old_category_id
+                brand_chg = fr.new_brand != fr.old_brand
+                row_bg    = "background:#fffbeb" if fr.needs_fix else "background:#f8fafc"
+
+                with ui.row().classes(
+                    "w-full rounded px-2 py-1 gap-2 items-start border-b border-slate-100 text-xs"
+                ).style(row_bg):
+                    # 상품명
+                    ui.label(fr.product_name[:55]).style(
+                        "flex:2; min-width:0; word-break:break-all; color:#374151"
+                    )
+
+                    # 카테고리 변경
+                    with ui.column().style("flex:2; min-width:0; gap:1px"):
+                        if cat_chg:
+                            ui.label(
+                                f"전: {fr.old_category_id} {fr.old_category_name[:14]}"
+                            ).style("color:#ef4444; text-decoration:line-through")
+                            ui.label(
+                                f"후: {fr.new_category_id} {fr.new_category_name[:14]}"
+                            ).style("color:#16a34a; font-weight:600")
+                        else:
+                            ui.label(
+                                f"{fr.old_category_id} {fr.old_category_name[:18]}"
+                            ).style("color:#9ca3af")
+
+                    # 브랜드 변경
+                    with ui.column().style("flex:1; min-width:0; gap:1px"):
+                        if brand_chg:
+                            ui.label(f"전: {fr.old_brand}").style(
+                                "color:#ef4444; text-decoration:line-through"
+                            )
+                            ui.label(f"후: {fr.new_brand}").style(
+                                "color:#16a34a; font-weight:600"
+                            )
+                        else:
+                            ui.label(fr.old_brand or "-").style("color:#9ca3af")
+
+                    # 이유
+                    ui.label(fr.reason or "-").style("flex:1; min-width:0; color:#6b7280")
+
+                    # 브랜드 락 토글
+                    with ui.element("div").classes("w-20 flex justify-center"):
+                        if brand_chg:
+                            def _make_lock(fix_result: FixResult):
+                                sw = ui.switch(
+                                    "",
+                                    value=fix_result.brand_locked,
+                                    on_change=lambda e, fr=fix_result: setattr(fr, "brand_locked", e.value),
+                                ).props("dense")
+                                return sw
+                            _make_lock(fr)
+                        else:
+                            ui.label("-").style("color:#d1d5db; text-align:center")
 
 
 # ── 메인 페이지 ──────────────────────────────────────────────────
