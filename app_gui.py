@@ -4541,6 +4541,7 @@ def _make_nav_header(current: str):
         ui.button(alert_label, on_click=lambda: ui.navigate.to("/monitor")).classes(mon_cls)
 
         ui.html('<div class="nav-spacer"></div>')
+        ui.html('<div class="nav-divider"></div>')
 
         ui.button("🔄 재시작", on_click=_restart_app).classes("topbar-restart")
 
