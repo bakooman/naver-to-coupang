@@ -9975,7 +9975,7 @@ def page() -> None:
                         log_cb=_log_cb,
                         progress_cb=_progress_cb,
                         product_data=_product_data,
-                        headless=False,
+                        headless=True,
                         gemini_api_key=getattr(_settings, "GEMINI_API_KEY", ""),
                     ),
                 )
@@ -10189,7 +10189,7 @@ async def _on_startup():
                             log_cb=lambda msg: print(f"[Wing-TG] {msg}"),
                             progress_cb=None,
                             product_data=product_data,
-                            headless=False,
+                            headless=True,
                             gemini_api_key=getattr(_settings, "GEMINI_API_KEY", ""),
                         ),
                     )
@@ -10290,11 +10290,10 @@ def page_price_fix() -> None:
             return len(ta & tb) / min(len(ta), len(tb))
 
         # 공백 제거 + 브랜드 공통 문자열 제거 → 핵심 식별 키
-        _STOP_PAT = _re.compile(r'bbw|배쓰앤바디웍스|배스앤바디웍스|배스앤바디|바디웍스|배스앤')
+        _STOP_PAT = _re.compile(r'bbw|배쓰앤바디웍스|배스앤바디웍스|배스앤바디|바디웍스|배스앤|\d+(?:ml|g|oz|l|mg|kg)')
 
         def _key(name: str) -> str:
-            """공백 완전 제거 + 브랜드 공통 문자열 제거 → 핵심 식별 문자열.
-            이렇게 하면 '유아더원' = '유아 더 원', '바디크림' = '바디 크림' 등이 동일해짐."""
+            """공백 완전 제거 + 브랜드/용량 공통 문자열 제거 → 핵심 식별 문자열."""
             s = _re.sub(r'\s+', '', name.lower())
             return _STOP_PAT.sub('', s)
 
