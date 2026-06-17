@@ -5906,15 +5906,16 @@ async def page_error_fix() -> None:
         "fix_results": [],     # list[FixResult]
         "processing":  False,
     }
+    _CAT_OPTS_PATH = Path("config/category_options.json")
 
     with ui.element("div").props("id=page-wrap"):
         _make_nav_header("error-fix")
         ui.separator()
 
         with ui.element("div").classes("p-4 max-w-6xl mx-auto w-full"):
-            ui.label("🔧 오류 엑셀 수정").classes("text-2xl font-bold text-slate-800 mb-1")
+            ui.label("📗 엑셀수정").classes("text-2xl font-bold text-slate-800 mb-1")
             ui.label(
-                "Wing 일괄등록 엑셀 파일을 업로드하면 Gemini가 카테고리·브랜드 오매핑을 자동 감지하고 수정합니다."
+                "Wing 일괄등록 엑셀 업로드 → Gemini 카테고리·브랜드 오매핑 감지·수정 + 중복 옵션 행 자동 삭제 + 필수 옵션 누락 검사"
             ).classes("text-sm text-slate-500 mb-4")
 
             # ── ① 파일 업로드 ─────────────────────────────────
@@ -5988,11 +5989,19 @@ async def page_error_fix() -> None:
                         prog_bar.set_value(0)
                         prog_label.set_text("분석 시작...")
 
-                        from modules.excel_fixer import gemini_check, FixResult
+                        from modules.excel_fixer import gemini_check, FixResult, check_options
                         _det     = _get_detector()
                         _api_key = getattr(_settings, "GEMINI_API_KEY", "")
                         _model   = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
                         loop     = asyncio.get_running_loop()
+
+                        # ① 옵션 검증 (Gemini 불필요, 즉시 실행)
+                        prog_label.set_text("옵션 중복 및 필수 옵션 검사 중...")
+                        products = await loop.run_in_executor(
+                            None,
+                            lambda: check_options(products, _CAT_OPTS_PATH),
+                        )
+
                         total    = len(products)
                         fix_results: list[FixResult] = []
 
@@ -6024,20 +6033,25 @@ async def page_error_fix() -> None:
                             new_brand     = raw_new_brand if raw_new_brand else prod["brand"]
                             cat_chg       = new_cat_id != prod["category_id"]
                             brand_chg     = new_brand.lower() != (prod["brand"] or "").lower()
-                            needs_fix     = g.get("needs_fix", False) or cat_chg or brand_chg
+                            opt_issues    = prod.get("has_option_issues", False)
+                            needs_fix     = g.get("needs_fix", False) or cat_chg or brand_chg or opt_issues
 
                             fix_results.append(FixResult(
-                                product_name      = prod["product_name"],
-                                old_category_id   = prod["category_id"],
-                                old_category_name = prod["_cat_name"],
-                                new_category_id   = new_cat_id,
-                                new_category_name = new_cat_name,
-                                new_gosisi_cat    = new_gosisi,
-                                old_brand         = prod["brand"],
-                                new_brand         = new_brand,
-                                needs_fix         = needs_fix,
-                                reason            = g.get("reason", ""),
-                                row_indices       = prod["row_indices"],
+                                product_name          = prod["product_name"],
+                                old_category_id       = prod["category_id"],
+                                old_category_name     = prod["_cat_name"],
+                                new_category_id       = new_cat_id,
+                                new_category_name     = new_cat_name,
+                                new_gosisi_cat        = new_gosisi,
+                                old_brand             = prod["brand"],
+                                new_brand             = new_brand,
+                                needs_fix             = needs_fix,
+                                reason                = g.get("reason", ""),
+                                row_indices           = prod["row_indices"],
+                                dup_rows              = prod.get("dup_rows", []),
+                                invalid_option_types  = prod.get("invalid_option_types", []),
+                                missing_required_opts = prod.get("missing_required_opts", []),
+                                has_option_issues     = opt_issues,
                             ))
                             prog_bar.set_value((i + 1) / total)
 
@@ -6082,7 +6096,7 @@ async def page_error_fix() -> None:
                 with ui.card_section():
                     ui.label("④ 수정 엑셀 다운로드").classes("font-bold text-slate-700 text-sm mb-2")
                     ui.label(
-                        "수정 사항이 적용된 새 엑셀을 저장합니다. 브랜드 락이 ON인 항목은 브랜드 변경이 차단됩니다."
+                        "카테고리·브랜드 수정 + 중복 옵션 행 삭제가 적용된 새 엑셀을 저장합니다. 브랜드 락 ON 항목은 브랜드 변경 차단."
                     ).classes("text-xs text-slate-400 mb-2")
 
                     async def _on_download():
@@ -6126,16 +6140,36 @@ async def page_error_fix() -> None:
                 ui.label("검수 결과 없음").classes("text-sm text-slate-400 p-2")
             return
 
-        changed_cnt = sum(1 for fr in fix_results if fr.needs_fix)
+        changed_cnt   = sum(1 for fr in fix_results if fr.needs_fix)
+        dup_total     = sum(len(fr.dup_rows) for fr in fix_results)
+        opt_issue_cnt = sum(1 for fr in fix_results if fr.has_option_issues)
+
         with results_area:
+            # 요약 배너
             if changed_cnt:
-                ui.label(
-                    f"⚠️ 수정 필요 {changed_cnt}개 / 정상 {len(fix_results) - changed_cnt}개"
-                ).classes("text-xs font-bold text-amber-600 px-2 py-1")
+                summary_parts = [f"수정 필요 {changed_cnt}개 / 정상 {len(fix_results) - changed_cnt}개"]
+                if dup_total:
+                    summary_parts.append(f"중복 옵션 행 {dup_total}개 삭제 예정")
+                if opt_issue_cnt:
+                    summary_parts.append(f"옵션 이슈 {opt_issue_cnt}개 상품")
+                ui.label("⚠️ " + " | ".join(summary_parts)).classes(
+                    "text-xs font-bold text-amber-600 px-2 py-1"
+                )
             else:
-                ui.label("✅ 모든 상품 카테고리·브랜드 정상").classes(
+                ui.label("✅ 모든 상품 카테고리·브랜드·옵션 정상").classes(
                     "text-xs font-bold text-green-600 px-2 py-1"
                 )
+
+            # 테이블 헤더
+            with ui.row().classes(
+                "w-full bg-slate-100 rounded px-2 py-1 gap-2 text-xs font-bold text-slate-600 mt-1"
+            ):
+                ui.label("상품명").style("flex:2; min-width:0")
+                ui.label("카테고리").style("flex:2; min-width:0")
+                ui.label("브랜드").style("flex:1; min-width:0")
+                ui.label("옵션 이슈").style("flex:2; min-width:0")
+                ui.label("이유").style("flex:1; min-width:0")
+                ui.label("브랜드락").classes("w-20 text-center")
 
             for fr in fix_results:
                 cat_chg   = fr.new_category_id != fr.old_category_id
@@ -6145,10 +6179,12 @@ async def page_error_fix() -> None:
                 with ui.row().classes(
                     "w-full rounded px-2 py-1 gap-2 items-start border-b border-slate-100 text-xs"
                 ).style(row_bg):
-                    # 상품명
-                    ui.label(fr.product_name[:55]).style(
-                        "flex:2; min-width:0; word-break:break-all; color:#374151"
-                    )
+                    # 상품명 + 행 수
+                    with ui.column().style("flex:2; min-width:0; gap:1px"):
+                        ui.label(fr.product_name[:45]).style(
+                            "word-break:break-all; color:#374151"
+                        )
+                        ui.label(f"총 {len(fr.row_indices)}행").style("color:#9ca3af; font-size:10px")
 
                     # 카테고리 변경
                     with ui.column().style("flex:2; min-width:0; gap:1px"):
@@ -6175,6 +6211,23 @@ async def page_error_fix() -> None:
                             )
                         else:
                             ui.label(fr.old_brand or "-").style("color:#9ca3af")
+
+                    # 옵션 이슈
+                    with ui.column().style("flex:2; min-width:0; gap:2px"):
+                        if fr.dup_rows:
+                            ui.label(f"🗑 중복 {len(fr.dup_rows)}행 삭제").style(
+                                "color:#dc2626; font-weight:600"
+                            )
+                        if fr.invalid_option_types:
+                            ui.label(f"⚠ 유효하지 않은 옵션: {', '.join(fr.invalid_option_types[:3])}").style(
+                                "color:#d97706"
+                            )
+                        if fr.missing_required_opts:
+                            ui.label(f"❗ 누락 필수옵션: {', '.join(fr.missing_required_opts[:3])}").style(
+                                "color:#7c3aed"
+                            )
+                        if not fr.has_option_issues:
+                            ui.label("✓ 정상").style("color:#9ca3af")
 
                     # 이유
                     ui.label(fr.reason or "-").style("flex:1; min-width:0; color:#6b7280")

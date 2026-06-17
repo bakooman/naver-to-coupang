@@ -2,6 +2,7 @@
 오류 엑셀 자동 수정 모듈
 
 Wing 일괄등록 Excel을 파싱 → Gemini로 카테고리/브랜드 오매핑 감지 → 수정 Excel 재출력.
+옵션 중복 제거 및 필수 옵션 타입 검증 포함.
 """
 from __future__ import annotations
 
@@ -28,13 +29,18 @@ class FixResult:
     old_category_name: str
     new_category_id:   str
     new_category_name: str
-    new_gosisi_cat:    str    = ""
-    old_brand:         str    = ""
-    new_brand:         str    = ""
-    needs_fix:         bool   = False
-    reason:            str    = ""
-    brand_locked:      bool   = False
+    new_gosisi_cat:    str       = ""
+    old_brand:         str       = ""
+    new_brand:         str       = ""
+    needs_fix:         bool      = False
+    reason:            str       = ""
+    brand_locked:      bool      = False
     row_indices:       list[int] = field(default_factory=list)
+    # 옵션 관련
+    dup_rows:               list[int] = field(default_factory=list)   # 삭제할 중복 행
+    invalid_option_types:   list[str] = field(default_factory=list)   # 유효하지 않은 옵션 타입명
+    missing_required_opts:  list[str] = field(default_factory=list)   # 누락된 필수 옵션 타입
+    has_option_issues:      bool      = False
 
 
 # ── 헤더 감지 (ExcelBuilder와 동일 로직) ──────────────────────────
@@ -97,7 +103,7 @@ def parse_excel(src_path: Path) -> tuple[dict, str, list[dict], int]:
     Returns:
         (col_map, src_ext, products, header_row)
         products: 상품명 기준으로 그룹핑된 dict 리스트
-          각 dict: {product_name, category_id, brand, options, row_indices}
+          각 dict: {product_name, category_id, brand, options, all_options, dup_rows, row_indices}
     """
     if not OPENPYXL_OK:
         raise RuntimeError("openpyxl 미설치: pip install openpyxl")
@@ -128,24 +134,100 @@ def parse_excel(src_path: Path) -> tuple[dict, str, list[dict], int]:
         pname = _get(r, "product_name")
         if not pname:
             continue
+
+        # 이 행의 옵션 읽기 (최대 3개 차원)
+        row_opts: list[tuple[str, str]] = []
+        for i in range(3):
+            ot = _get(r, f"_option_type_{i}")
+            ov = _get(r, f"_option_val_{i}")
+            if ot:
+                row_opts.append((ot, ov))
+
         if pname not in seen:
-            opts: list[tuple[str, str]] = []
-            for i in range(3):
-                ot = _get(r, f"_option_type_{i}")
-                ov = _get(r, f"_option_val_{i}")
-                if ot:
-                    opts.append((ot, ov))
             seen[pname] = dict(
                 product_name=pname,
                 category_id=_get(r, "category_id"),
                 brand=_get(r, "brand"),
-                options=opts,
+                options=row_opts,          # 첫 행 옵션 (기존 호환)
+                all_options=[],            # 모든 행 옵션 (type, value) 쌍 목록
+                options_by_row={},         # row_idx → [(type, val)]
+                seen_combos=set(),         # 중복 감지용
+                dup_rows=[],               # 중복 행 인덱스
                 row_indices=[],
             )
-        seen[pname]["row_indices"].append(r)
+
+        prod = seen[pname]
+        combo_key = tuple(row_opts)
+
+        if combo_key in prod["seen_combos"]:
+            prod["dup_rows"].append(r)
+        else:
+            prod["seen_combos"].add(combo_key)
+            for pair in row_opts:
+                prod["all_options"].append(pair)
+
+        prod["options_by_row"][r] = row_opts
+        prod["row_indices"].append(r)
+
+    # seen_combos는 직렬화 불필요 → 제거
+    for p in seen.values():
+        p.pop("seen_combos", None)
 
     wb.close()
     return col_map, src_ext, list(seen.values()), header_row
+
+
+# ── 옵션 검증 ─────────────────────────────────────────────────────
+
+def check_options(products: list[dict], cat_options_path: Path) -> list[dict]:
+    """
+    각 상품의 옵션을 category_options.json 기준으로 검증.
+
+    products 리스트의 각 dict에 아래 필드를 추가:
+      - invalid_option_types: 유효하지 않은 옵션 타입명 목록
+      - missing_required_opts: 누락된 필수 옵션 타입 목록
+      - has_option_issues: bool
+    """
+    try:
+        with open(cat_options_path, encoding="utf-8") as f:
+            cat_opts_data: dict = json.load(f)
+    except Exception:
+        cat_opts_data = {}
+
+    for prod in products:
+        cat_id = prod.get("category_id", "")
+        cat_info = cat_opts_data.get(str(cat_id), {})
+        valid_opts     = set(cat_info.get("valid_options", []))
+        required_opts  = set(cat_info.get("required_options", []))
+
+        # 이 상품에서 실제로 사용 중인 옵션 타입들 (중복 제외)
+        used_types: set[str] = set()
+        for r, row_opts in prod.get("options_by_row", {}).items():
+            if r not in prod.get("dup_rows", []):
+                for ot, _ in row_opts:
+                    if ot:
+                        used_types.add(ot)
+
+        # 유효하지 않은 옵션 타입 (valid_options에 없음; valid_opts가 비어있으면 무시)
+        invalid: list[str] = []
+        if valid_opts:
+            for t in sorted(used_types):
+                if t not in valid_opts:
+                    invalid.append(t)
+
+        # 누락된 필수 옵션: required_options 중 하나도 사용 안 된 경우에만 경고
+        # (Wing은 required_options 중 1개 이상이면 OK — 전체 필수는 아님)
+        missing: list[str] = []
+        if required_opts and not (used_types & required_opts):
+            missing = sorted(required_opts)
+
+        prod["invalid_option_types"] = invalid
+        prod["missing_required_opts"] = missing
+        prod["has_option_issues"] = bool(
+            prod.get("dup_rows") or invalid or missing
+        )
+
+    return products
 
 
 # ── Gemini 검수 ───────────────────────────────────────────────────
@@ -223,6 +305,8 @@ def apply_and_save(
 ) -> Path:
     """
     원본 파일을 재로드하여 수정사항을 적용하고 저장.
+    - 카테고리/브랜드 셀 수정
+    - 중복 옵션 행 삭제 (인덱스 큰 것부터)
     brand_locked=True인 항목은 브랜드 변경 차단.
     """
     if not OPENPYXL_OK:
@@ -231,6 +315,7 @@ def apply_and_save(
     wb = load_workbook(str(src_path), keep_vba=(src_ext == ".xlsm"))
     ws = wb.active
 
+    # ─ 1) 카테고리·브랜드 셀 수정 ─────────────────────────────
     for fr in fix_results:
         cat_changed   = fr.new_category_id and fr.new_category_id != fr.old_category_id
         brand_changed = (not fr.brand_locked) and fr.new_brand and fr.new_brand != fr.old_brand
@@ -247,6 +332,19 @@ def apply_and_save(
                 ws.cell(row=r, column=col_map["_gosisi_cat"], value=fr.new_gosisi_cat)
             if brand_changed and "brand" in col_map:
                 ws.cell(row=r, column=col_map["brand"], value=fr.new_brand)
+
+    # ─ 2) 중복 행 삭제 (큰 인덱스부터, 행 이동 방지) ──────────
+    all_dup_rows: list[int] = []
+    for fr in fix_results:
+        all_dup_rows.extend(fr.dup_rows)
+
+    deleted = 0
+    for r in sorted(set(all_dup_rows), reverse=True):
+        ws.delete_rows(r)
+        deleted += 1
+
+    if deleted:
+        print(f"[ExcelFixer] 중복 행 {deleted}개 삭제 완료")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
