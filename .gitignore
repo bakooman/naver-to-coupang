@@ -12,6 +12,7 @@ data/*
 !data/queue_state.json
 !data/price_watch.json
 !data/brand_map.json
+!data/해외배송.png
 coupang_data.json
 
 # 백업/임시 파일
