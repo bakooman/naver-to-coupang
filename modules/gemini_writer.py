@@ -11,8 +11,9 @@ Google Gemini (google-genai SDK) 를 이용한 쿠팡 상세페이지 판매 설
   1. 팩트에 기반해서만 작성 (추측·과장 금지)
   2. 성분·규격·용량·구성 정보 있으면 반드시 포함
   3. 판매자(스마트스토어) 개인정보, 쇼핑몰 홍보, 배송 안내 등 일절 제외
-  4. 제품 자체의 특징·용도·사용법·주의사항만 작성
-  5. 한국어, 간결하게
+  4. 유통사·수입사·판매처·소싱처·공급원 등 유통 관련 정보는 절대 언급 금지
+  5. 제품 자체의 특징·용도·사용법·주의사항만 작성
+  6. 한국어, 간결하게
 """
 from __future__ import annotations
 
@@ -33,8 +34,14 @@ def _load_image_bytes(url: str, timeout: int = 8) -> Optional[bytes]:
         return None
 
 
+_SPEC_BLOCK_NAMES = {
+    "유통사", "판매자", "수입사", "수입원", "판매원", "공급원", "공급사",
+    "판매처", "구매처", "소싱처", "수입업체", "수입자",
+    "distributor", "seller", "vendor", "importer", "reseller",
+}
+
 def _extract_specs(raw_json: dict, depth: int = 0) -> dict[str, str]:
-    """raw_json 에서 속성/스펙 키-값 재귀 추출."""
+    """raw_json 에서 속성/스펙 키-값 재귀 추출. 유통사/판매자 정보는 제외."""
     if depth > 6 or not isinstance(raw_json, dict):
         return {}
     SPEC_KEYS = {
@@ -57,7 +64,8 @@ def _extract_specs(raw_json: dict, depth: int = 0) -> dict[str, str]:
                                 or item.get("key") or "")
                         val  = (item.get("attributeValue") or item.get("value")
                                 or item.get("val") or "")
-                        if name and val:
+                        # 유통사/판매자 관련 속성명은 제외
+                        if name and val and str(name).strip() not in _SPEC_BLOCK_NAMES:
                             result[str(name)] = str(val)[:200]
             elif isinstance(v, dict):
                 result.update(_extract_specs(v, depth + 1))
@@ -299,7 +307,9 @@ def _generate_text(
             3. 자연스러운 한국어 문체(~합니다, ~해요)로 설득력 있는 세일즈 카피 작성.
             4. 성분·규격·용량·구성 정보가 있으면 ul/li로 깔끔하게 정리하세요.
             5. 판매자 정보, 쇼핑몰 홍보, 배송 안내는 일절 쓰지 마세요.
-            6. 애매하면 쓰지 마세요: 금지 여부가 불확실한 표현은 과감히 제거하고
+            6. 유통사·수입사·판매처·소싱처·공급원·판매원·유통업체명은 절대로 언급하지 마세요.
+               스펙 정보에 있더라도 제외하세요.
+            7. 애매하면 쓰지 마세요: 금지 여부가 불확실한 표현은 과감히 제거하고
                제품의 실제 사용감·기능·구성 설명으로 대체하세요.
 
             ══════════════════════════════════════════
