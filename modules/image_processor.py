@@ -271,8 +271,12 @@ class ImageProcessor:
         canvas = Image.new("RGBA", (W, H), (255, 255, 255, 255))
 
         # 투명 여백 제거 후 캔버스의 92% 크기로 중앙 배치
+        ow, oh = nobg.size
         obj = self._crop_to_content(nobg)
+        cw, ch = obj.size
+        print(f"[ImageProcessor] 크롭: {ow}×{oh} → {cw}×{ch} (변화={ow-cw}×{oh-ch}px)")
         obj = self._resize_obj(obj, int(W * 0.92), int(H * 0.92))
+        print(f"[ImageProcessor] 리사이즈: {cw}×{ch} → {obj.width}×{obj.height} (캔버스 {W}×{H})")
         x   = (W - obj.width)  // 2
         y   = (H - obj.height) // 2
         canvas.paste(obj, (x, y), obj)
