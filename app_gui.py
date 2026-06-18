@@ -10278,15 +10278,22 @@ def page_price_fix() -> None:
                             row_num = int(_re2.sub(r'[A-Z]+', '', ref))
                             replaced = False
 
-                            # ① 일반 셀 교체: <c r="X4">...</c>
-                            def _replacer(m, _p=new_price):
+                            # Wing Excel은 모든 셀을 t="inlineStr" + <is><t>값</t></is> 형태로 저장.
+                            # <v> 숫자 형태로 쓰면 Wing이 읽지 못함 → inlineStr로 써야 함.
+                            sp = str(new_price)
+
+                            def _replacer(m, _sp=sp):
                                 inner = m.group(0)
-                                if "<v>" in inner:
-                                    inner = _re2.sub(r"<v>[^<]*</v>", f"<v>{_p}</v>", inner)
-                                else:
-                                    inner = inner[:-4] + f"<v>{_p}</v></c>"
-                                inner = _re2.sub(r'\s*t="[^"]*"', '', inner, count=1)
-                                return inner
+                                if '<is>' in inner:
+                                    # inlineStr 셀: <t> 내용 교체
+                                    return _re2.sub(r'<t>[^<]*</t>', f'<t>{_sp}</t>', inner, count=1)
+                                if '<v>' in inner:
+                                    # 숫자 셀: <v> 교체 후 t속성 제거
+                                    r2 = _re2.sub(r'<v>[^<]*</v>', f'<v>{_sp}</v>', inner)
+                                    return _re2.sub(r'\s*t="[^"]*"', '', r2, count=1)
+                                # 빈 셀 (<c r="P4" s="11"></c>): inlineStr로 채움
+                                r2 = _re2.sub(r'\s*t="[^"]*"', '', inner, count=1)
+                                return _re2.sub(r'></c>$', f' t="inlineStr"><is><t>{_sp}</t></is></c>', r2)
 
                             pat_full = (r'<c\b[^>]*\br="'
                                         + _re2.escape(ref)
@@ -10297,13 +10304,11 @@ def page_price_fix() -> None:
                                 replaced = True
 
                             if not replaced:
-                                # ② 자기닫힘 셀: <c r="X4" s="N"/> (값 없이 스타일만 있는 빈 셀)
-                                def _replacer_self(m, _p=new_price):
-                                    inner = m.group(0)
-                                    inner = _re2.sub(r'\s*t="[^"]*"', '', inner)
-                                    # /> → ><v>price</v></c>
-                                    inner = _re2.sub(r'\s*/>\s*$', f'><v>{_p}</v></c>', inner)
-                                    return inner
+                                # ② 자기닫힘 셀: <c r="X4" s="N"/>
+                                def _replacer_self(m, _sp=sp):
+                                    inner = _re2.sub(r'\s*t="[^"]*"', '', m.group(0))
+                                    return _re2.sub(r'\s*/>\s*$',
+                                                    f' t="inlineStr"><is><t>{_sp}</t></is></c>', inner)
 
                                 pat_self = (r'<c\b[^>]*\br="'
                                             + _re2.escape(ref)
@@ -10314,11 +10319,11 @@ def page_price_fix() -> None:
                                     replaced = True
 
                             if not replaced:
-                                # ③ 셀 자체 없음 → 해당 행에 새 셀 삽입
+                                # ③ 셀 자체 없음 → 해당 행에 inlineStr 셀 삽입
                                 row_pat = (r'(<row\b[^>]*\br="'
                                            + str(row_num)
                                            + r'"[^>]*>)((?:(?!</row>).)*)(</row>)')
-                                new_cell = f'<c r="{ref}"><v>{new_price}</v></c>'
+                                new_cell = f'<c r="{ref}" t="inlineStr"><is><t>{sp}</t></is></c>'
 
                                 def _insert(m, _nc=new_cell, _cl=col_letter, _rn=row_num):
                                     content = m.group(2)
