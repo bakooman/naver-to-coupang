@@ -36,7 +36,6 @@ from modules.price_calculator import PriceCalculator
 from modules.image_uploader import upload_pil, upload_file, upload_url
 from modules.excel_builder import ExcelBuilder, BulkItem, Bundle
 from modules.category_detector import get_detector as _get_detector
-from modules.wing_automator import run_bulk_publish_sync as _run_bulk_publish
 from modules.gemini_writer import generate_detail_image_url as _gemini_detail
 from modules.coupang_registrar import CoupangRegistrar
 import modules.price_checker as _pc
@@ -3686,10 +3685,8 @@ _global_template_path: dict[str, str]  = {"v": ""}
 _global_output_file:   dict[str, str]  = {"v": ""}
 _global_running:       dict[str, bool] = {"v": False}
 _global_stop_req:      dict[str, bool] = {"v": False}  # 중단 요청 플래그
-_global_wing_running:  dict[str, bool] = {"v": False}  # Wing 자동화 전용 플래그
 _global_price_checking: dict = {"v": False, "done": 0, "total": 0}  # 가격 체크 진행 중 플래그
 _global_log_buffer:    list[str]       = []          # 로그 전역 버퍼
-_global_wing_log_buffer: list[str]     = []          # Wing 판매요청 로그 전역 버퍼
 _global_task:          "asyncio.Task | None" = None  # 백그라운드 처리 Task
 # 마지막 배치 메타 (파일명·크기·URL별 수량) — 재작업 복원용
 _last_batch_meta:      dict[str, object] = {"v": {}}
@@ -7209,7 +7206,7 @@ def page() -> None:
                 # ── 메인 큐 카드 (버튼 + 진행 + 배송비 + 다운로드 + 아이템 전부 포함) ──
                 with ui.card().classes("shadow-sm w-full"):
 
-                    # ① 헤더: 목록수 + 목록초기화 + 판매요청시작
+                    # ① 헤더: 목록수 + 목록초기화
                     with ui.card_section():
                         queue_source_lbl = ui.label("").classes(
                             "text-xs text-teal-400 font-medium mb-1"
@@ -7256,17 +7253,6 @@ def page() -> None:
                                 ui.button("🗑 목록 초기화", icon="delete_sweep",
                                     on_click=_on_reset_queue,
                                 ).props("color=red-7 outline size=md").classes("font-bold")
-                                wing_pub_btn_shopk = ui.button(
-                                    "🚀 샵케이", icon="send"
-                                ).props("color=deep-orange size=md").classes("font-bold").on_click(
-                                    lambda: _on_wing_publish("샵케이")
-                                )
-                                wing_pub_btn_zenith = ui.button(
-                                    "🚀 제니스 트레이딩", icon="send"
-                                ).props("color=indigo size=md").classes("font-bold").on_click(
-                                    lambda: _on_wing_publish("제니스 트레이딩")
-                                )
-                        wing_pub_status = ui.label("").classes("text-xs text-slate-500")
 
                     # ② 실행 컨트롤: 전체처리시작 + 진행 + 오류 네비
                     with ui.card_section().classes("py-2 border-t border-slate-700"):
@@ -7739,44 +7725,15 @@ def page() -> None:
                     )
                     ui.notify(f"수집 로그 복사 완료! ({len(text):,}자)", type="positive", timeout=2500)
 
-                async def _copy_wing_log():
-                    if not _global_wing_log_buffer:
-                        ui.notify("복사할 Wing 로그가 없습니다.", type="warning", timeout=2000)
-                        return
-                    text = "\n".join(_global_wing_log_buffer)
-                    esc  = text.replace("\\", "\\\\").replace("`", "\\`")
-                    await ui.run_javascript(
-                        f"navigator.clipboard.writeText(`{esc}`)"
-                        f".catch(()=>{{const t=document.createElement('textarea');"
-                        f"t.value=`{esc}`;document.body.appendChild(t);"
-                        f"t.select();document.execCommand('copy');"
-                        f"document.body.removeChild(t);}});"
-                    )
-                    ui.notify(f"Wing 로그 복사 완료! ({len(text):,}자)", type="positive", timeout=2500)
-
                 with ui.card().classes("shadow-sm w-full"):
-                    with ui.tabs().classes("w-full") as _log_tabs:
-                        _tab_collect = ui.tab("📦 수집 로그")
-                        _tab_wing    = ui.tab("🚀 Wing 판매요청 로그")
-                    with ui.tab_panels(_log_tabs, value=_tab_collect).classes("w-full"):
-                        with ui.tab_panel(_tab_collect):
-                            with ui.row().classes("items-center justify-between mb-2"):
-                                ui.label("수집 로그").classes("font-bold text-slate-700")
-                                with ui.row().classes("gap-1"):
-                                    ui.button("복사", icon="content_copy", on_click=_copy_log).props("flat dense size=sm color=teal")
-                                    ui.button("지우기", icon="delete_outline",
-                                        on_click=lambda: (log_widget.clear(), _global_log_buffer.clear()),
-                                    ).props("flat dense size=sm color=grey")
-                            log_widget = ui.log(max_lines=5000).style(_LOG_STYLE).classes("nicegui-log")
-                        with ui.tab_panel(_tab_wing):
-                            with ui.row().classes("items-center justify-between mb-2"):
-                                ui.label("Wing 판매요청 로그").classes("font-bold text-slate-700")
-                                with ui.row().classes("gap-1"):
-                                    ui.button("복사", icon="content_copy", on_click=_copy_wing_log).props("flat dense size=sm color=teal")
-                                    ui.button("지우기", icon="delete_outline",
-                                        on_click=lambda: (wing_log_widget.clear(), _global_wing_log_buffer.clear()),
-                                    ).props("flat dense size=sm color=grey")
-                            wing_log_widget = ui.log(max_lines=2000).style(_LOG_STYLE).classes("nicegui-log")
+                    with ui.row().classes("items-center justify-between mb-2"):
+                        ui.label("수집 로그").classes("font-bold text-slate-700")
+                        with ui.row().classes("gap-1"):
+                            ui.button("복사", icon="content_copy", on_click=_copy_log).props("flat dense size=sm color=teal")
+                            ui.button("지우기", icon="delete_outline",
+                                on_click=lambda: (log_widget.clear(), _global_log_buffer.clear()),
+                            ).props("flat dense size=sm color=grey")
+                    log_widget = ui.log(max_lines=5000).style(_LOG_STYLE).classes("nicegui-log")
 
     _history_page = {"v": 0}   # 현재 페이지 인덱스 (0-based)
     _HISTORY_PAGE_SIZE = 5
@@ -10107,202 +10064,6 @@ def page() -> None:
 
         _prev_done["v"] = _should_show_dl
 
-    # ── Wing 자동 판매요청 핸들러 ─────────────────────────────────
-
-    async def _on_wing_publish(store: str | None = None):
-        """
-        Wing 임시저장 목록에서 draft=False 상품들에 판매요청 클릭.
-        store 지정 시 해당 스토어만 실행. None이면 큐 기반 자동 결정.
-        """
-        # 스토어별 계정 매핑
-        _STORE_CREDS = {
-            "샵케이": (
-                getattr(_settings, "WING_USERNAME", ""),
-                getattr(_settings, "WING_PASSWORD", ""),
-            ),
-            "제니스 트레이딩": (
-                getattr(_settings, "WING_USERNAME_ZENITH", ""),
-                getattr(_settings, "WING_PASSWORD_ZENITH", ""),
-            ),
-        }
-
-        if store is not None:
-            # 버튼으로 직접 지정된 스토어만 실행
-            _stores_in_queue = [store]
-        else:
-            # 큐에 있는 done 항목의 스토어 목록 수집
-            _stores_in_queue = list(dict.fromkeys(
-                getattr(e, "watch_store", "샵케이")
-                for e in queue if e.status == "done" and e.result_item
-            ))
-            if not _stores_in_queue:
-                _stores_in_queue = [
-                    _st for _st, (_u, _p) in _STORE_CREDS.items() if _u and _p
-                ]
-
-        if not _stores_in_queue:
-            ui.notify("Wing 계정 정보가 없습니다 — .env에서 WING_USERNAME/WING_PASSWORD 확인", type="negative", timeout=5000)
-            return
-
-        # 계정 누락 스토어 제거
-        _stores_in_queue = [
-            _st for _st in _stores_in_queue
-            if _STORE_CREDS.get(_st, ("", ""))[0] and _STORE_CREDS.get(_st, ("", ""))[1]
-        ]
-        if not _stores_in_queue:
-            ui.notify("Wing 계정 정보 누락 — .env 확인", type="negative", timeout=5000)
-            return
-
-        # ── 세션 파일 사전 확인 ─────────────────────────────────────────
-        # 세션 파일 없으면 서버에서 xauth 재로그인 불가 → 3분 타임아웃 전에 미리 차단
-        _data_dir = Path(__file__).parent / "data"
-        _missing_sessions: list[str] = []
-        for _st in _stores_in_queue:
-            _su, _ = _STORE_CREDS[_st]
-            if not _su:
-                continue
-            _slug = _re.sub(r'[^a-zA-Z0-9]', '_', _su)[:32]
-            _sess_file = _data_dir / f"wing_session_{_slug}.json"
-            if not _sess_file.exists():
-                _missing_sessions.append(_st)
-        if _missing_sessions:
-            _st_list = ", ".join(_missing_sessions)
-            ui.notify(
-                f"Wing 세션 파일 없음 ({_st_list})\n"
-                f"로컬 PC에서 refresh_wing_session.py 실행 후 서버에 업로드하세요",
-                type="negative", timeout=10000,
-            )
-            wing_pub_status.set_text(f"⚠️ 세션 파일 없음 ({_st_list}) — refresh_wing_session.py 실행 필요")
-            return
-
-        # draft=True 상품 목록
-        draft_names: list[str] = [
-            e.result_item.product_name
-            for e in queue
-            if e.result_item and e.result_item.draft
-        ]
-
-        # 상품별 데이터 수집 (GTIN, 번들 정보 → Wing 속성 자동 입력용)
-        _product_data: dict = {}
-        for _e in queue:
-            if _e.result_item and _e.status == "done":
-                _pname = _e.result_item.product_name or _e.product_name or ""
-                if not _pname:
-                    continue
-                _bundles_info = {}
-                for _b in (_e.result_item.bundles or []):
-                    _bundles_info[_b.qty] = {"weight": ""}
-                _weight_str = ""
-                if _e.volume and _e.volume > 0:
-                    _weight_str = f"{_e.volume:g}{_e.volume_unit}"
-                _product_data[_pname] = {
-                    "gtin": _e.gtin or _e.result_item.gtin or "",
-                    "bundles": _bundles_info,
-                    "weight": _weight_str,
-                }
-
-        if _global_wing_running["v"]:
-            ui.notify("Wing 자동화가 이미 실행 중입니다.", type="warning", timeout=4000)
-            return
-
-        _global_wing_running["v"] = True
-        wing_pub_btn_shopk.set_enabled(False)
-        wing_pub_btn_zenith.set_enabled(False)
-        _store_label = " + ".join(_stores_in_queue)
-        wing_pub_status.set_text(f"⏳ Wing 실행 중 ({_store_label})...")
-        ui.notify(f"Wing 판매요청 시작 — {_store_label}", type="info", timeout=4000)
-
-        _progress_state = {"current": 0, "total": 0}
-
-        def _log_cb(msg: str):
-            _global_wing_log_buffer.append(msg)
-            try:
-                wing_log_widget.push(msg)
-                cur, tot = _progress_state["current"], _progress_state["total"]
-                if tot > 0:
-                    wing_pub_status.set_text(f"[{cur}/{tot}] {msg[-50:] if len(msg) > 50 else msg}")
-                else:
-                    wing_pub_status.set_text(msg[-60:] if len(msg) > 60 else msg)
-            except Exception:
-                pass  # 페이지 이동으로 UI 삭제된 경우 무시
-
-        def _progress_cb(current: int, total: int):
-            _progress_state["current"] = current
-            _progress_state["total"] = total
-            try:
-                if total > 0:
-                    wing_pub_status.set_text(f"[{current}/{total}] 처리 중...")
-            except Exception:
-                pass
-
-        loop = asyncio.get_running_loop()
-        _total_pub = 0; _total_skip = 0; _total_errs: list = []; _all_pub_names: list = []
-        try:
-            for _store in _stores_in_queue:
-                _u, _p = _STORE_CREDS[_store]
-                _log_cb(f"── [{_store}] Wing 판매요청 시작 ──")
-                wing_pub_status.set_text(f"⏳ [{_store}] Wing 실행 중...")
-                _result = await loop.run_in_executor(
-                    None,
-                    lambda u=_u, p=_p: _run_bulk_publish(
-                        username=u,
-                        password=p,
-                        skip_names=draft_names,
-                        log_cb=_log_cb,
-                        progress_cb=_progress_cb,
-                        product_data=_product_data,
-                        headless=True,
-                        gemini_api_key=getattr(_settings, "GEMINI_API_KEY", ""),
-                    ),
-                )
-                _total_pub  += _result.get("published", 0)
-                _total_skip += _result.get("skipped", 0)
-                _total_errs += _result.get("errors", [])
-                _all_pub_names += _result.get("published_names", [])
-                _store_errs = _result.get("errors", [])
-                _err_suffix = f" / ⚠️ 오류: {', '.join(str(e) for e in _store_errs[:2])}" if _store_errs else ""
-                _log_cb(f"── [{_store}] 완료: {_result.get('published',0)}개 요청 / {_result.get('skipped',0)}개 건너뜀{_err_suffix} ──")
-
-            msg = f"✅ 판매요청 완료: {_total_pub}개 요청 / {_total_skip}개 건너뜀"
-            if _total_errs:
-                msg += f" / ⚠️ {len(_total_errs)}건 오류"
-            wing_pub_status.set_text(msg)
-            ui.notify(msg, type="positive" if not _total_errs else "warning", timeout=6000)
-            ui.run_javascript(f"window._notifyDone('Wing 판매요청 완료 — {_total_pub}개')")
-            tg_msg = f"✅ <b>[자동등록 완료]</b>\n판매요청: {_total_pub}개 / 건너뜀: {_total_skip}개"
-            if _total_errs:
-                tg_msg += f"\n⚠️ 오류 {len(_total_errs)}건: {', '.join(str(e) for e in _total_errs[:3])}"
-            _send_notification(tg_msg)
-
-            # ── 판매요청 성공 상품을 이력 파일에 저장 ────────────────────
-            if _all_pub_names:
-                _saved_cnt = 0
-                for _e in queue:
-                    _ename = (_e.result_item.product_name if _e.result_item else _e.product_name) or ""
-                    if any(_pn and (_pn[:30] in _ename or _ename[:30] in _pn) for _pn in _all_pub_names):
-                        _vol_str = f"{_e.volume:g}{_e.volume_unit}" if _e.volume else ""
-                        try:
-                            _add_to_history(
-                                brand        = _e.brand or "",
-                                product_name = _ename[:50],
-                                volume       = _vol_str,
-                                category_id  = _e.category_id or "",
-                                naver_url    = _e.url,
-                                gtin         = _e.gtin or "",
-                            )
-                            _saved_cnt += 1
-                        except Exception as _he:
-                            print(f"[이력저장] 오류: {_he}")
-                if _saved_cnt:
-                    ui.notify(f"📋 등록 이력 {_saved_cnt}개 저장됨", type="info", timeout=3000)
-        except Exception as exc:
-            wing_pub_status.set_text(f"오류: {exc}")
-            ui.notify(f"Wing 판매요청 오류: {exc}", type="negative", timeout=6000)
-        finally:
-            _global_wing_running["v"] = False
-            wing_pub_btn_shopk.set_enabled(True)
-            wing_pub_btn_zenith.set_enabled(True)
-
     # 초기 렌더링 + 기존 로그 복원
     _render_queue()
     for line in _global_log_buffer:
@@ -10311,11 +10072,6 @@ def page() -> None:
         except Exception:
             pass
     _log_last_idx["v"] = len(_global_log_buffer)
-    for line in _global_wing_log_buffer:
-        try:
-            wing_log_widget.push(line)
-        except Exception:
-            pass
 
     # 처리 중: 1초마다 폴링 / 유휴: 3초마다 (WebSocket 부하 감소)
     _tick_timer = ui.timer(1.0, _tick)
@@ -10386,126 +10142,6 @@ async def _on_startup():
             await asyncio.get_running_loop().run_in_executor(None, lambda: _cleanup_output(24))
     asyncio.create_task(_periodic_cleanup())
 
-    # ── 텔레그램 [▶ 자동등록 시작] 버튼 폴링 ────────────────────
-    async def _telegram_register_poll():
-        loop = asyncio.get_running_loop()
-        while True:
-            await asyncio.sleep(10)
-            try:
-                triggered = await loop.run_in_executor(None, _poll_register_callback)
-                if not triggered:
-                    continue
-
-                # 크롤링 or Wing 자동화가 이미 실행 중이면 무시
-                if _global_running["v"] or _global_wing_running["v"]:
-                    _send_notification("⚠️ 이미 처리 중입니다. 완료 후 다시 시도하세요.")
-                    continue
-
-                done_entries = [e for e in _global_queue if e.status == "done"]
-                if not done_entries:
-                    _send_notification("⚠️ 등록할 완료 상품이 없습니다. 먼저 수집을 실행하세요.")
-                    continue
-
-                username = getattr(_settings, "WING_USERNAME", "")
-                password = getattr(_settings, "WING_PASSWORD", "")
-                if not username or not password:
-                    _send_notification("❌ Wing 계정 정보 없음 — .env에 WING_USERNAME / WING_PASSWORD 확인")
-                    continue
-
-                # 세션 파일 없으면 headless 로그인 불가 → 안내 후 중단
-                _session_file = Path(__file__).parent / "data" / "wing_session.json"
-                if not _session_file.exists():
-                    _send_notification(
-                        "⚠️ <b>Wing 로그인 세션 없음</b>\n\n"
-                        "텔레그램 자동등록은 저장된 로그인 세션이 필요합니다.\n"
-                        "PC 앱에서 🚀 판매요청 시작 버튼을 한 번 눌러 로그인하면\n"
-                        "이후부터 텔레그램 버튼으로 자동 실행됩니다."
-                    )
-                    continue
-
-                _global_wing_running["v"] = True
-                _send_notification("⏳ 자동등록 시작 중... 완료 시 결과를 알려드립니다.")
-                print("[TG-폴링] 텔레그램 버튼으로 자동등록 시작")
-
-                # draft=True 상품은 skip (result_item.draft 기준 — UI와 동일 로직)
-                draft_names = []
-                for e in _global_queue:
-                    if e.result_item and e.result_item.draft:
-                        name = e.result_item.product_name or ""
-                        if name:
-                            draft_names.append(name)
-
-                # product_data: gtin + bundles + weight 포함 (UI _on_wing_publish와 동일)
-                product_data = {}
-                for e in _global_queue:
-                    if e.status != "done" or not e.result_item:
-                        continue
-                    pname = e.result_item.product_name or e.product_name or ""
-                    if not pname:
-                        continue
-                    bundles_info = {}
-                    for b in (e.result_item.bundles or []):
-                        bundles_info[b.qty] = {"weight": ""}
-                    weight_str = ""
-                    if e.volume and e.volume > 0:
-                        weight_str = f"{e.volume:g}{e.volume_unit}"
-                    product_data[pname] = {
-                        "gtin": e.gtin or e.result_item.gtin or "",
-                        "bundles": bundles_info,
-                        "weight": weight_str,
-                    }
-
-                try:
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: _run_bulk_publish(
-                            username=username,
-                            password=password,
-                            skip_names=draft_names,
-                            log_cb=lambda msg: print(f"[Wing-TG] {msg}"),
-                            progress_cb=None,
-                            product_data=product_data,
-                            headless=True,
-                            gemini_api_key=getattr(_settings, "GEMINI_API_KEY", ""),
-                        ),
-                    )
-                    pub  = result.get("published", 0)
-                    skip = result.get("skipped", 0)
-                    errs = result.get("errors", [])
-                    msg  = f"✅ <b>[자동등록 완료]</b>\n판매요청: {pub}개 / 건너뜀: {skip}개"
-                    if errs:
-                        msg += f"\n⚠️ 오류 {len(errs)}건: {', '.join(str(e) for e in errs[:3])}"
-                    _send_notification(msg)
-                    print(f"[TG-폴링] 자동등록 완료: {pub}개")
-
-                    # 이력 저장
-                    pub_names = result.get("published_names", [])
-                    for e in _global_queue:
-                        ename = (e.result_item.product_name if e.result_item else e.product_name) or ""
-                        if any(_pn and (_pn[:30] in ename or ename[:30] in _pn) for _pn in pub_names):
-                            vol_str = f"{e.volume:g}{e.volume_unit}" if e.volume else ""
-                            try:
-                                _add_to_history(
-                                    brand=e.brand or "",
-                                    product_name=ename[:50],
-                                    volume=vol_str,
-                                    category_id=e.category_id or "",
-                                    naver_url=e.url,
-                                    gtin=e.gtin or "",
-                                )
-                            except Exception:
-                                pass
-
-                except Exception as exc:
-                    _send_notification(f"❌ 자동등록 오류: {exc}")
-                    print(f"[TG-폴링] 자동등록 오류: {exc}")
-                finally:
-                    _global_wing_running["v"] = False
-
-            except Exception as ex:
-                print(f"[TG-폴링] 루프 오류 (무시): {ex}")
-
-    asyncio.create_task(_telegram_register_poll())
 
 
 # ── 가격수정 페이지 ──────────────────────────────────────────────
