@@ -270,11 +270,13 @@ class ImageProcessor:
         W, H = self.canvas_size
         canvas = Image.new("RGBA", (W, H), (255, 255, 255, 255))
 
-        # 투명 여백 제거 후 캔버스의 92% 크기로 중앙 배치
+        # 투명 여백 제거 → 정사각형 패딩 → 캔버스 92% 꽉 채움
         ow, oh = nobg.size
         obj = self._crop_to_content(nobg)
         cw, ch = obj.size
         print(f"[ImageProcessor] 크롭: {ow}×{oh} → {cw}×{ch} (변화={ow-cw}×{oh-ch}px)")
+        # 정사각형 패딩: 짧은 축에 흰 여백 추가 → 항상 캔버스 92% 전면 사용
+        obj = self._pad_to_square(obj)
         obj = self._resize_obj(obj, int(W * 0.92), int(H * 0.92))
         print(f"[ImageProcessor] 리사이즈: {cw}×{ch} → {obj.width}×{obj.height} (캔버스 {W}×{H})")
         x   = (W - obj.width)  // 2
@@ -467,6 +469,26 @@ class ImageProcessor:
             pass
 
         return img
+
+    @staticmethod
+    def _pad_to_square(img: Image.Image) -> Image.Image:
+        """짧은 축에 흰 여백을 추가해 정사각형으로 만든다. 항상 캔버스 92% 꽉 채우기 위한 전처리."""
+        w, h = img.size
+        if w == h:
+            return img
+        side = max(w, h)
+        # RGBA 이미지는 투명 패딩, RGB는 흰색 패딩
+        if img.mode == "RGBA":
+            bg = Image.new("RGBA", (side, side), (255, 255, 255, 0))
+        else:
+            bg = Image.new("RGB", (side, side), (255, 255, 255))
+        x = (side - w) // 2
+        y = (side - h) // 2
+        if img.mode == "RGBA":
+            bg.paste(img, (x, y), img)
+        else:
+            bg.paste(img, (x, y))
+        return bg
 
     @staticmethod
     def _resize_obj(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
