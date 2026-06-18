@@ -92,7 +92,7 @@ class ImageProcessor:
         result: dict[int, str] = {}
         for qty in quantities:
             try:
-                composed = self._compose(nobg, qty)
+                composed = self._compose(nobg, qty, skip_crop=skip_nobg)
                 if _single_unit:
                     # 1~1개 단일상품: 원형 배지 숫자 없이 깔끔한 이미지
                     labeled = composed
@@ -260,27 +260,28 @@ class ImageProcessor:
 
     # ── Step 2: 누끼 이미지 중앙 배치 (수량 무관 1개 고정) ─────────
 
-    def _compose(self, nobg: Image.Image, qty: int) -> Image.Image:
+    def _compose(self, nobg: Image.Image, qty: int, skip_crop: bool = False) -> Image.Image:
         """
         흰색 캔버스 중앙에 누끼 이미지를 1개 배치.
         수량 표시는 _stamp_label()의 원형 배지로 처리.
 
-        qty 값은 _stamp_label()에 전달되어 배지 텍스트로 사용됨.
+        skip_crop=True: 커스텀 이미지(원본 유지) — 배경 크롭 없이 원본 그대로 캔버스에 맞춤
         """
         W, H = self.canvas_size
         canvas = Image.new("RGBA", (W, H), (255, 255, 255, 255))
 
-        # 투명 여백 제거 → 정사각형 패딩 → 캔버스 92% 꽉 채움
-        ow, oh = nobg.size
-        obj = self._crop_to_content(nobg)
-        cw, ch = obj.size
-        print(f"[ImageProcessor] 크롭: {ow}×{oh} → {cw}×{ch} (변화={ow-cw}×{oh-ch}px)")
-        # 정사각형 패딩: 짧은 축에 흰 여백 추가 → 항상 캔버스 92% 전면 사용
-        obj = self._pad_to_square(obj)
-        obj = self._resize_obj(obj, int(W * 0.92), int(H * 0.92))
-        print(f"[ImageProcessor] 리사이즈: {cw}×{ch} → {obj.width}×{obj.height} (캔버스 {W}×{H})")
-        x   = (W - obj.width)  // 2
-        y   = (H - obj.height) // 2
+        if skip_crop:
+            # 원본 이미지 그대로 정사각형 패딩 → 캔버스 92%
+            obj = self._pad_to_square(nobg)
+            obj = self._resize_obj(obj, int(W * 0.92), int(H * 0.92))
+        else:
+            # 누끼 이미지: 투명 여백 크롭 → 정사각형 패딩 → 캔버스 92%
+            obj = self._crop_to_content(nobg)
+            obj = self._pad_to_square(obj)
+            obj = self._resize_obj(obj, int(W * 0.92), int(H * 0.92))
+
+        x = (W - obj.width)  // 2
+        y = (H - obj.height) // 2
         canvas.paste(obj, (x, y), obj)
 
         return canvas.convert("RGB")
@@ -387,7 +388,7 @@ class ImageProcessor:
                 except Exception:
                     return ""
 
-        composed = self._compose(img, qty=0)   # qty=0: _compose 내부에서 배지 없이 캔버스만 생성
+        composed = self._compose(img, qty=0, skip_crop=skip_nobg)
         path = self._save_detail(composed, product_id)
         print(f"[ImageProcessor] 상세이미지(배지없음) 저장 완료: {path}")
         return path
