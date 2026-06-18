@@ -10284,9 +10284,9 @@ def page_price_fix() -> None:
 
                             def _replacer(m, _sp=sp):
                                 inner = m.group(0)
-                                if '<is>' in inner:
-                                    # inlineStr 셀: <t> 내용 교체
-                                    return _re2.sub(r'<t>[^<]*</t>', f'<t>{_sp}</t>', inner, count=1)
+                                if '<is' in inner:
+                                    # inlineStr 셀: <t xml:space="preserve"> 등 속성 있는 경우도 처리
+                                    return _re2.sub(r'<t[^>]*>[^<]*</t>', f'<t>{_sp}</t>', inner, count=1)
                                 if '<v>' in inner:
                                     # 숫자 셀: <v> 교체 후 t속성 제거
                                     r2 = _re2.sub(r'<v>[^<]*</v>', f'<v>{_sp}</v>', inner)
