@@ -270,8 +270,9 @@ class ImageProcessor:
         W, H = self.canvas_size
         canvas = Image.new("RGBA", (W, H), (255, 255, 255, 255))
 
-        # 캔버스의 78% 크기로 중앙 배치
-        obj = self._resize_obj(nobg, int(W * 0.78), int(H * 0.78))
+        # 투명 여백 제거 후 캔버스의 78% 크기로 중앙 배치
+        obj = self._crop_to_content(nobg)
+        obj = self._resize_obj(obj, int(W * 0.78), int(H * 0.78))
         x   = (W - obj.width)  // 2
         y   = (H - obj.height) // 2
         canvas.paste(obj, (x, y), obj)
@@ -402,6 +403,19 @@ class ImageProcessor:
         return path
 
     # ── 헬퍼 ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _crop_to_content(img: Image.Image) -> Image.Image:
+        """투명 채널이 있는 이미지에서 비투명 픽셀의 바운딩박스만 잘라냄."""
+        if img.mode != "RGBA":
+            return img
+        try:
+            bbox = img.split()[3].getbbox()  # 알파 채널 기준 bbox
+            if bbox:
+                return img.crop(bbox)
+        except Exception:
+            pass
+        return img
 
     @staticmethod
     def _resize_obj(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
