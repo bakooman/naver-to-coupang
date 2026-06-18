@@ -1936,11 +1936,47 @@ async def _process_entry(
             )
         entry.product_name = product.name
         entry.naver_price  = product.price   # 네이버 원가(1개) — 가격감시 기준가용
-        # ── 브랜드 1순위: Gemini 직접 추출 (영문명|한글명 형식) ─────────
-        # 영문명과 한글명 동시 추출 → 쿠팡 DB 양방향 검색에 활용
-        _brand_from_gemini = False  # True면 이후 _resolve_brand_korean 스킵
-        _brand_alt = ""             # 대체 검색어 (영문↔한글 상호 보완)
+        # ── 브랜드 1순위: 네이버 상품정보 페이지 직접 파싱 ──────────────
+        # crawler가 __PRELOADED_STATE__ JSON에서 추출한 brand 필드 + 속성 테이블 탐색
+        _brand_from_gemini = False
+        _brand_alt = ""
+        _invalid_brand_set = {"해당없음", "없음", "unknown", ""}
+
         if not entry.brand:
+            _page_brand = (product.brand or "").strip()
+
+            # raw_json 속성 목록에서 '브랜드'/'제조사' 키 탐색 (상품정보 테이블)
+            if not _page_brand or _page_brand.lower() in _invalid_brand_set:
+                def _find_brand_attr(d, depth=0):
+                    if not isinstance(d, dict) or depth > 6:
+                        return ""
+                    _BKEYS = {"브랜드", "brand", "브랜드명", "제조사", "manufacturer", "brandname"}
+                    for k, v in d.items():
+                        if k.lower() in _BKEYS:
+                            if isinstance(v, str) and v.strip() and v.strip().lower() not in _invalid_brand_set:
+                                return v.strip()
+                        if isinstance(v, list):
+                            for item in v:
+                                if isinstance(item, dict):
+                                    _aname = (item.get("attributeName") or item.get("name") or "").strip()
+                                    _aval  = (item.get("attributeValue") or item.get("value") or "").strip()
+                                    if _aname in ("브랜드", "브랜드명", "제조사") and _aval.lower() not in _invalid_brand_set:
+                                        return _aval
+                        elif isinstance(v, dict):
+                            _r = _find_brand_attr(v, depth + 1)
+                            if _r:
+                                return _r
+                    return ""
+                _page_brand = _find_brand_attr(product.raw_json)
+
+            if _page_brand and _page_brand.lower() not in _invalid_brand_set:
+                log_(f"[{entry.uid[:6]}] ✅ 브랜드 페이지직접(1순위): '{_page_brand}'")
+                entry.brand = _page_brand
+
+        # ── 브랜드 2순위: Gemini 직접 추출 (영문명|한글명 형식) ──────────
+        # 1순위에서 브랜드를 못 읽었을 때만 Gemini 질의
+        if not entry.brand or entry.brand.strip() in ("해당없음", ""):
+            entry.brand = ""
             _gk_b = getattr(_settings, "GEMINI_API_KEY", "")
             if _gk_b:
                 try:
@@ -1971,16 +2007,13 @@ async def _process_entry(
                         None, lambda: genai.GenerativeModel(_gm_b).generate_content(_brand_prompt)
                     )
                     _brand_raw = (_gresp_b.text or "").strip().split("\n")[0].strip()
-                    # 파이프 구분 파싱
                     if "|" in _brand_raw:
                         _bp = _brand_raw.split("|", 1)
                         _brand_en = _bp[0].strip()
                         _brand_kr = _bp[1].strip()
                     else:
-                        # 파이프 없는 응답 → 단일 값 처리 (구버전 호환)
                         _brand_en = _brand_raw if _is_english_brand(_brand_raw) else ""
                         _brand_kr = _brand_raw if not _is_english_brand(_brand_raw) else ""
-                    # 영문명 우선, 없으면 한글명
                     _invalid = {"해당없음", "없음", "unknown", ""}
                     _brand_en_ok = _brand_en.lower() not in _invalid
                     _brand_kr_ok = _brand_kr.lower() not in _invalid
@@ -1988,21 +2021,15 @@ async def _process_entry(
                     _brand_secondary = _brand_kr if _brand_en_ok and _brand_kr_ok else (
                                        _brand_en if not _brand_en_ok and _brand_kr_ok else "")
                     if _brand_primary:
-                        log_(f"[{entry.uid[:6]}] ✅ 브랜드 Gemini(1순위): "
+                        log_(f"[{entry.uid[:6]}] ✅ 브랜드 Gemini(2순위): "
                              f"'{_brand_primary}' (alt: '{_brand_secondary}')")
                         entry.brand  = _brand_primary
                         _brand_alt   = _brand_secondary
                         _brand_from_gemini = True
                     else:
-                        log_(f"[{entry.uid[:6]}] ⚠ 브랜드 Gemini 미인식 — 규칙 기반 폴백")
+                        log_(f"[{entry.uid[:6]}] ⚠ 브랜드 Gemini 미인식 — 브랜드 없음으로 처리")
                 except Exception as _be:
-                    log_(f"[{entry.uid[:6]}] ⚠ 브랜드 Gemini 실패: {_be} — 규칙 기반 폴백")
-
-        # ── 브랜드 2순위: 규칙 기반 폴백 (Gemini 실패/미인식 시) ────────
-        if not entry.brand or entry.brand.strip() in ("해당없음", ""):
-            entry.brand = _auto_brand(product.name)
-            if entry.brand and entry.brand not in ("해당없음", ""):
-                log_(f"[{entry.uid[:6]}] 브랜드 규칙 기반(2순위) 추출: '{entry.brand}'")
+                    log_(f"[{entry.uid[:6]}] ⚠ 브랜드 Gemini 실패: {_be}")
 
         log_(f"[{entry.uid[:6]}] 크롤 완료: {product.name} (브랜드: {entry.brand})")
 
@@ -5067,9 +5094,12 @@ def page_monitor() -> None:
                                 with ui.card_section().classes("py-2"):
                                     with ui.row().classes("items-center gap-3 w-full flex-wrap"):
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
-                                            ui.label(w.name or w.url[:60]).classes(
-                                                "text-sm font-semibold text-slate-700 truncate"
-                                            )
+                                            with ui.row().classes("items-center gap-1"):
+                                                _sv = getattr(w, "store", "샵케이") or "샵케이"
+                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                ui.label(w.name or w.url[:60]).classes(
+                                                    "text-sm font-semibold text-slate-700 truncate"
+                                                )
                                             ui.link(w.url[:60], w.url, new_tab=True).classes(
                                                 "text-xs text-blue-500 font-mono"
                                             )
@@ -5127,9 +5157,12 @@ def page_monitor() -> None:
                                 with ui.card_section().classes("py-2"):
                                     with ui.row().classes("items-center gap-3 w-full flex-wrap"):
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
-                                            ui.label(w.name or w.url[:60]).classes(
-                                                "text-sm font-semibold text-slate-700 truncate"
-                                            )
+                                            with ui.row().classes("items-center gap-1"):
+                                                _sv = getattr(w, "store", "샵케이") or "샵케이"
+                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                ui.label(w.name or w.url[:60]).classes(
+                                                    "text-sm font-semibold text-slate-700 truncate"
+                                                )
                                             ui.link(w.url[:60], w.url, new_tab=True).classes(
                                                 "text-xs text-blue-500 font-mono"
                                             )
@@ -5186,9 +5219,12 @@ def page_monitor() -> None:
                                 with ui.card_section().classes("py-2"):
                                     with ui.row().classes("items-center gap-3 w-full flex-wrap"):
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
-                                            ui.label(w.name or w.url[:60]).classes(
-                                                "text-sm font-semibold text-slate-700 truncate"
-                                            )
+                                            with ui.row().classes("items-center gap-1"):
+                                                _sv = getattr(w, "store", "샵케이") or "샵케이"
+                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                ui.label(w.name or w.url[:60]).classes(
+                                                    "text-sm font-semibold text-slate-700 truncate"
+                                                )
                                             ui.link(w.url[:60], w.url, new_tab=True).classes(
                                                 "text-xs text-blue-500 font-mono"
                                             )
@@ -5236,9 +5272,12 @@ def page_monitor() -> None:
                                 with ui.card_section().classes("py-2"):
                                     with ui.row().classes("items-center gap-3 w-full flex-wrap"):
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
-                                            ui.label(w.name or w.url[:60]).classes(
-                                                "text-sm font-semibold text-slate-700 truncate"
-                                            )
+                                            with ui.row().classes("items-center gap-1"):
+                                                _sv = getattr(w, "store", "샵케이") or "샵케이"
+                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                ui.label(w.name or w.url[:60]).classes(
+                                                    "text-sm font-semibold text-slate-700 truncate"
+                                                )
                                             ui.link(w.url[:60], w.url, new_tab=True).classes(
                                                 "text-xs text-blue-500 font-mono"
                                             )

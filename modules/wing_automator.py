@@ -2706,15 +2706,21 @@ class WingAutomator:
                             if (!btn.offsetParent) continue;
                             const t = btn.textContent.trim();
                             if (t !== '상품등록' && t !== '확인') continue;
-                            /* footer 고정 버튼 제외 (position: fixed/sticky) */
+                            /* footer 고정 버튼 제외 (position: fixed/sticky)
+                               단, "판매요청" 텍스트가 있는 fixed 컨테이너는 모달이므로 허용 */
                             if (t === '상품등록') {
-                                let el = btn; let isFixed = false;
+                                let el = btn; let fixedEl = null;
                                 while (el && el !== document.body) {
                                     const pos = getComputedStyle(el).position;
-                                    if (pos === 'fixed' || pos === 'sticky') { isFixed = true; break; }
+                                    if (pos === 'fixed' || pos === 'sticky') { fixedEl = el; break; }
                                     el = el.parentElement;
                                 }
-                                if (isFixed) continue;
+                                if (fixedEl) {
+                                    const fc = fixedEl.textContent || '';
+                                    if (!fc.includes('판매요청') && !fc.includes('쿠팡에서 바로 판매')) {
+                                        continue; /* 진짜 footer 버튼 → 건너뜀 */
+                                    }
+                                }
                             }
                             /* 에러 팝업 컨텍스트 제외 */
                             let p = btn.parentElement; let isErr = false;
