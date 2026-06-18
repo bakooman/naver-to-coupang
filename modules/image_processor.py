@@ -23,7 +23,8 @@ from config.settings import Settings
 
 # ── 폰트 후보 (Windows → Linux 순) ──────────────────────────────
 _FONT_CANDIDATES = [
-    "C:/Windows/Fonts/malgunsl.ttf",    # 맑은 고딕 Semilight (Windows) — 가장 얇음
+    "data/fonts/NotoSansKR-Light.otf",  # Noto Sans KR Light — 가장 얇음 (프로젝트 내장)
+    "C:/Windows/Fonts/malgunsl.ttf",    # 맑은 고딕 Semilight (Windows)
     "C:/Windows/Fonts/malgun.ttf",      # 맑은 고딕 Regular   (Windows)
     "C:/Windows/Fonts/malgunbd.ttf",    # 맑은 고딕 Bold      (fallback)
     "C:/Windows/Fonts/gulim.ttc",       # 굴림                (Windows)

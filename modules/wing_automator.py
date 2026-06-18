@@ -2779,6 +2779,7 @@ class WingAutomator:
                 _registered_by_confirm = False  # 등록 확인 팝업 클릭 성공 여부
                 _rg_exceeded = False  # RG팝업 3회 반복 한도 초과 플래그
 
+                await asyncio.sleep(2)  # 팝업 완전 로딩 대기
                 for _pw in range(15):   # 0.3s × 15 = 4.5초
                     await asyncio.sleep(0.3)
                     # ① 로켓그로스 판매방식 선택 팝업 전용 처리 (에러 아님)
