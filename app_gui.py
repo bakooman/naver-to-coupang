@@ -2455,6 +2455,32 @@ async def _process_entry(
             except Exception as ie:
                 log_(f"[{entry.uid[:6]}] 이미지 가공 실패 (원본 URL 사용): {ie}")
 
+        # ── 2-b. 해외배송 모드: 썸네일 하단에 해외배송.png 오버레이 ────────
+        if lead_time == 10 and composed:
+            _ov_path = Path(__file__).parent / "data" / "해외배송.png"
+            if _ov_path.exists():
+                try:
+                    from PIL import Image as _PILImg
+                    _ov_src = _PILImg.open(_ov_path).convert("RGBA")
+                    _overlaid: dict[int, str] = {}
+                    for _oq, _opath in composed.items():
+                        try:
+                            _base = _PILImg.open(_opath).convert("RGBA")
+                            _bw, _bh = _base.size
+                            _ow = _bw
+                            _oh = int(_ov_src.height * (_ow / _ov_src.width))
+                            _ov_resized = _ov_src.resize((_ow, _oh), _PILImg.LANCZOS)
+                            _base.paste(_ov_resized, (0, _bh - _oh), _ov_resized)
+                            _base.convert("RGB").save(_opath)
+                            _overlaid[_oq] = _opath
+                        except Exception as _oe2:
+                            log_(f"[{entry.uid[:6]}] ⚠ 해외배송 오버레이 실패 ({_oq}개): {_oe2}")
+                            _overlaid[_oq] = _opath
+                    composed = _overlaid
+                    log_(f"[{entry.uid[:6]}] 해외배송.png 썸네일 오버레이 완료 ({len(_overlaid)}개)")
+                except Exception as _ove:
+                    log_(f"[{entry.uid[:6]}] ⚠ 해외배송 오버레이 전체 실패: {_ove}")
+
         # ── 3. R2 이미지 업로드 ───────────────────────────────────
         log_(f"[{entry.uid[:6]}] R2 이미지 업로드 시작...")
         bundle_image_urls: dict[int, str] = {}
