@@ -305,7 +305,7 @@ class ImageProcessor:
         text  = f"{qty}개"
 
         # ── 원 크기·위치 ────────────────────────────────────────
-        d      = int(min(W, H) * 0.190)
+        d      = int(min(W, H) * 0.215)  # 0.190 → 0.215 (글씨 크게)
         margin = int(min(W, H) * 0.028)
         cx     = margin + d // 2
         cy     = H - margin - d // 2
@@ -338,7 +338,7 @@ class ImageProcessor:
             stroke_width = 2
 
         # ── 폰트 크기 결정 ───────────────────────────────────────
-        font_size = int(d * 0.38) if qty < 10 else int(d * 0.28)
+        font_size = int(d * 0.46) if qty < 10 else int(d * 0.34)  # 글씨 크게
         font = self._load_font(font_size)
 
         # ── 텍스트 원 중앙 정렬 ──────────────────────────────────
@@ -348,7 +348,7 @@ class ImageProcessor:
         tx   = cx - tw // 2 - bbox[0]
         ty   = cy - th // 2 - bbox[1]
 
-        stroke_width = 5 if _is_zenith else 4
+        stroke_width = 4 if _is_zenith else 3  # 한 단계 얇게
         draw.text((tx, ty), text, fill=text_color, font=font,
                   stroke_width=stroke_width, stroke_fill=stroke_fill)
 
@@ -449,8 +449,8 @@ class ImageProcessor:
                 arr[-s:, :s].reshape(-1, 3),
                 arr[-s:, -s:].reshape(-1, 3),
             ])
-            bg = corners.mean(axis=0)
-            tol = 30  # 배경색 ±30 허용 (회색 음영 차이 흡수)
+            bg = np.median(corners, axis=0)  # mean 대신 median — 그라디언트 아웃라이어 강건
+            tol = 60  # 배경색 ±60 허용 (회색 그라디언트 배경까지 제거)
             diff = np.max(np.abs(arr - bg), axis=2)
             mask = diff > tol  # True = 상품 픽셀
             rows = np.any(mask, axis=1)
