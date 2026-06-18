@@ -452,12 +452,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "processing"
+    "status": "done"
   },
   {
     "uid": "801b09e3",
     "url": "https://smartstore.naver.com/euromarkt/products/10972095754",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -473,11 +473,11 @@
     "draft": false,
     "gtin": "",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 6600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -487,12 +487,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "602faefd",
     "url": "https://smartstore.naver.com/euromarkt/products/9259509678",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -508,11 +508,11 @@
     "draft": false,
     "gtin": "",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -522,12 +522,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "e0f78ad0",
     "url": "https://smartstore.naver.com/euromarkt/products/8670496926",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -543,11 +543,11 @@
     "draft": false,
     "gtin": "",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -557,12 +557,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "93301ea9",
     "url": "https://smartstore.naver.com/euromarkt/products/12773574661",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -578,11 +578,11 @@
     "draft": false,
     "gtin": "",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -592,12 +592,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "6baf785d",
     "url": "https://smartstore.naver.com/euromarkt/products/10972096748",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -611,13 +611,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "4001686151105",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -627,12 +627,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "f0e9d67f",
     "url": "https://smartstore.naver.com/euromarkt/products/8670500155",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -646,13 +646,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "4001686271292",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -662,12 +662,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "b43ea62b",
     "url": "https://smartstore.naver.com/euromarkt/products/8670489434",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -683,11 +683,11 @@
     "draft": false,
     "gtin": "",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -697,12 +697,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "363ece10",
     "url": "https://smartstore.naver.com/euromarkt/products/8670475056",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -716,13 +716,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "4001686271278",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -732,12 +732,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "026203dc",
     "url": "https://smartstore.naver.com/euromarkt/products/8670474252",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -751,13 +751,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "4001686271285",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -767,12 +767,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "16d94297",
     "url": "https://smartstore.naver.com/euromarkt/products/12809682003",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -788,11 +788,11 @@
     "draft": false,
     "gtin": "",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -802,12 +802,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "e2e6057d",
     "url": "https://smartstore.naver.com/euromarkt/products/11871762895",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -821,13 +821,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "4001686364406",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -837,12 +837,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "5153a3c5",
     "url": "https://smartstore.naver.com/euromarkt/products/11385968478",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -856,13 +856,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "4001686009703",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -872,12 +872,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "5fc1099c",
     "url": "https://smartstore.naver.com/euromarkt/products/8670487672",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -891,13 +891,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "4001686002421",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3600,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -907,12 +907,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "35e54b3e",
     "url": "https://smartstore.naver.com/euromarkt/products/13029962831",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -926,13 +926,13 @@
     "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
-    "gtin": "",
+    "gtin": "5410358459187",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 900,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -942,12 +942,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "done"
   },
   {
     "uid": "40b50331",
     "url": "https://smartstore.naver.com/euromarkt/products/13025972395",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -963,11 +963,11 @@
     "draft": false,
     "gtin": "",
     "source_file": "하리보.txt",
-    "gosisi_cat": "기타 재화",
-    "category_id": "",
+    "gosisi_cat": "가공식품",
+    "category_id": "72929",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 0,
+    "naver_price": 3300,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -977,12 +977,12 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "pending"
+    "status": "processing"
   },
   {
     "uid": "50e3b6ea",
     "url": "https://smartstore.naver.com/euromarkt/products/11815001358",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1017,7 +1017,7 @@
   {
     "uid": "4007e39f",
     "url": "https://smartstore.naver.com/euromarkt/products/11462899416",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1052,7 +1052,7 @@
   {
     "uid": "c4e9c54c",
     "url": "https://smartstore.naver.com/euromarkt/products/11462899245",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1087,7 +1087,7 @@
   {
     "uid": "74d3f0d2",
     "url": "https://smartstore.naver.com/euromarkt/products/11385968370",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1122,7 +1122,7 @@
   {
     "uid": "ad67ab1f",
     "url": "https://smartstore.naver.com/euromarkt/products/11385967883",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1157,7 +1157,7 @@
   {
     "uid": "7658164a",
     "url": "https://smartstore.naver.com/euromarkt/products/11002995268",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
@@ -1192,7 +1192,7 @@
   {
     "uid": "edf9503c",
     "url": "https://smartstore.naver.com/euromarkt/products/10972096925",
-    "brand": "",
+    "brand": "하리보",
     "qtys": [
       3,
       5,
