@@ -135,6 +135,9 @@ if %errorlevel% == 0 (
 :: -----------------------------------------------------------
 :: [5/5] Launch GUI
 :: -----------------------------------------------------------
+echo [5/5b] 최신 데이터 동기화 (git pull) ...
+cd /d "%ROOT%"
+git pull origin main 2>nul
 echo [5/5b] Launching GUI ...
 echo.
 "%VENV_PY%" "%ROOT%app_gui.py"
