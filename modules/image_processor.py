@@ -405,10 +405,14 @@ class ImageProcessor:
 
     @staticmethod
     def _resize_obj(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
-        """비율 유지하면서 최대 크기에 맞게 축소."""
-        copy = img.copy()
-        copy.thumbnail((max_w, max_h), Image.LANCZOS)
-        return copy
+        """비율 유지하면서 max_w×max_h 에 꽉 차도록 확대/축소."""
+        iw, ih = img.size
+        if iw == 0 or ih == 0:
+            return img
+        scale = min(max_w / iw, max_h / ih)
+        new_w = max(1, int(iw * scale))
+        new_h = max(1, int(ih * scale))
+        return img.resize((new_w, new_h), Image.LANCZOS)
 
     @staticmethod
     def _load_font(size: int) -> ImageFont.ImageFont:
