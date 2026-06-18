@@ -332,7 +332,7 @@ class ImageProcessor:
             stroke_width = 2
 
         # ── 폰트 크기 결정 ───────────────────────────────────────
-        font_size = int(d * 0.34) if qty < 10 else int(d * 0.25)
+        font_size = int(d * 0.38) if qty < 10 else int(d * 0.28)
         font = self._load_font(font_size)
 
         # ── 텍스트 원 중앙 정렬 ──────────────────────────────────
@@ -342,8 +342,10 @@ class ImageProcessor:
         tx   = cx - tw // 2 - bbox[0]
         ty   = cy - th // 2 - bbox[1]
 
+        # Light 폰트 보정: stroke로 중간 굵기 느낌
+        stroke_width = 2 if _is_zenith else 2
         draw.text((tx, ty), text, fill=text_color, font=font,
-                  stroke_width=0, stroke_fill=stroke_fill)
+                  stroke_width=stroke_width, stroke_fill=stroke_fill)
 
         return image
 
@@ -406,15 +408,51 @@ class ImageProcessor:
 
     @staticmethod
     def _crop_to_content(img: Image.Image) -> Image.Image:
-        """투명 채널이 있는 이미지에서 비투명 픽셀의 바운딩박스만 잘라냄."""
-        if img.mode != "RGBA":
-            return img
+        """
+        투명 여백 또는 흰/밝은 배경 여백을 잘라내고 실제 상품 영역만 반환.
+        1순위: RGBA 알파 채널 기준 크롭
+        2순위: 흰/밝은 배경 여백(임계값 240) BBox 크롭
+        """
+        import numpy as np
+
+        # 1순위: 알파 채널 기준
+        if img.mode == "RGBA":
+            try:
+                alpha = img.split()[3]
+                bbox = alpha.getbbox()
+                if bbox:
+                    cropped = img.crop(bbox)
+                    cw, ch = cropped.size
+                    ow, oh = img.size
+                    # 의미 있는 크롭이면 (원본 대비 10% 이상 줄었으면) 반환
+                    if cw < ow * 0.95 or ch < oh * 0.95:
+                        return cropped
+            except Exception:
+                pass
+
+        # 2순위: 흰/밝은 배경 여백 크롭 (RGB or RGBA 모두)
         try:
-            bbox = img.split()[3].getbbox()  # 알파 채널 기준 bbox
-            if bbox:
-                return img.crop(bbox)
+            rgb = img.convert("RGB")
+            arr = np.array(rgb)
+            # 밝기 임계값 240 이상 = 흰 여백으로 간주
+            mask = np.any(arr < 240, axis=2)  # True = 상품 픽셀
+            rows = np.any(mask, axis=1)
+            cols = np.any(mask, axis=0)
+            if rows.any() and cols.any():
+                r0, r1 = np.where(rows)[0][[0, -1]]
+                c0, c1 = np.where(cols)[0][[0, -1]]
+                pad = 4  # 살짝 여유
+                r0 = max(0, r0 - pad); r1 = min(arr.shape[0]-1, r1 + pad)
+                c0 = max(0, c0 - pad); c1 = min(arr.shape[1]-1, c1 + pad)
+                bbox2 = (c0, r0, c1+1, r1+1)
+                cropped2 = img.crop(bbox2)
+                cw2, ch2 = cropped2.size
+                ow, oh = img.size
+                if cw2 < ow * 0.95 or ch2 < oh * 0.95:
+                    return cropped2
         except Exception:
             pass
+
         return img
 
     @staticmethod
