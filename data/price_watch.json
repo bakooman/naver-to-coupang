@@ -71628,7 +71628,7 @@
       "current_price": 6500,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:48:53",
+      "last_checked": "2026-06-18T12:48:29",
       "added": "2026-06-07T09:43:10",
       "history": [
         {
@@ -71703,6 +71703,11 @@
         },
         {
           "ts": "2026-06-17T12:48:53",
+          "price": 6500,
+          "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:29",
           "price": 6500,
           "soldout": false
         }
@@ -71818,7 +71823,7 @@
       "current_price": 30500,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:48:56",
+      "last_checked": "2026-06-18T12:48:29",
       "added": "2026-06-07T10:03:19",
       "history": [
         {
@@ -71895,6 +71900,11 @@
           "ts": "2026-06-17T12:48:56",
           "price": 30500,
           "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:29",
+          "price": 30500,
+          "soldout": false
         }
       ],
       "acked": false,
@@ -71908,7 +71918,7 @@
       "current_price": 8600,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:49:00",
+      "last_checked": "2026-06-18T12:48:23",
       "added": "2026-06-07T10:03:19",
       "history": [
         {
@@ -71990,6 +72000,11 @@
           "ts": "2026-06-17T12:49:00",
           "price": 8600,
           "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:23",
+          "price": 8600,
+          "soldout": false
         }
       ],
       "acked": false,
@@ -72003,7 +72018,7 @@
       "current_price": 28000,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:49:14",
+      "last_checked": "2026-06-18T12:48:46",
       "added": "2026-06-07T10:03:19",
       "history": [
         {
@@ -72085,6 +72100,11 @@
           "ts": "2026-06-17T12:49:14",
           "price": 28000,
           "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:46",
+          "price": 28000,
+          "soldout": false
         }
       ],
       "acked": true,
@@ -72098,7 +72118,7 @@
       "current_price": 10500,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:49:17",
+      "last_checked": "2026-06-18T12:48:42",
       "added": "2026-06-07T10:03:19",
       "history": [
         {
@@ -72180,6 +72200,11 @@
           "ts": "2026-06-17T12:49:17",
           "price": 10500,
           "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:42",
+          "price": 10500,
+          "soldout": false
         }
       ],
       "acked": false,
@@ -72193,7 +72218,7 @@
       "current_price": 13000,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:49:16",
+      "last_checked": "2026-06-18T12:48:47",
       "added": "2026-06-07T10:03:19",
       "history": [
         {
@@ -72270,6 +72295,11 @@
           "ts": "2026-06-17T12:49:16",
           "price": 13000,
           "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:47",
+          "price": 13000,
+          "soldout": false
         }
       ],
       "acked": false,
@@ -72283,7 +72313,7 @@
       "current_price": 2890,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:49:33",
+      "last_checked": "2026-06-18T12:48:52",
       "added": "2026-06-07T10:35:48",
       "history": [
         {
@@ -72360,6 +72390,11 @@
           "ts": "2026-06-17T12:49:33",
           "price": 2890,
           "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:52",
+          "price": 2890,
+          "soldout": false
         }
       ],
       "acked": false,
@@ -72373,7 +72408,7 @@
       "current_price": 2690,
       "status": "ok",
       "change": 0,
-      "last_checked": "2026-06-17T12:49:35",
+      "last_checked": "2026-06-18T12:48:57",
       "added": "2026-06-07T10:35:48",
       "history": [
         {
@@ -72453,6 +72488,11 @@
         },
         {
           "ts": "2026-06-17T12:49:35",
+          "price": 2690,
+          "soldout": false
+        },
+        {
+          "ts": "2026-06-18T12:48:57",
           "price": 2690,
           "soldout": false
         }
@@ -120548,12 +120588,516 @@
       ],
       "acked": false,
       "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "a7cdf1f2",
+      "url": "https://smartstore.naver.com/agatory/products/12133319983",
+      "name": "쿠라콘 시오콘부",
+      "base_price": 3800,
+      "current_price": 3800,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:10",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "2a59220d",
+      "url": "https://smartstore.naver.com/agatory/products/12133319981",
+      "name": "쿠라콘 시오콘부",
+      "base_price": 4000,
+      "current_price": 4000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:10",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "15ecd955",
+      "url": "https://smartstore.naver.com/agatory/products/12132373239",
+      "name": "쿠라콘 시오콘부",
+      "base_price": 3400,
+      "current_price": 3400,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:10",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "ca427fa4",
+      "url": "https://smartstore.naver.com/agatory/products/12005264940",
+      "name": "쿠라콘 시오콘부",
+      "base_price": 5400,
+      "current_price": 5400,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:10",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "df6bf7fd",
+      "url": "https://smartstore.naver.com/agatory/products/12005264939",
+      "name": "쿠라콘 시오콘부",
+      "base_price": 4000,
+      "current_price": 4000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:10",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "4d79d2fd",
+      "url": "https://smartstore.naver.com/agatory/products/4513630215",
+      "name": "피타마스크 스몰, 화이트",
+      "base_price": 7500,
+      "current_price": 7500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:11",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "044be251",
+      "url": "https://smartstore.naver.com/agatory/products/4513619429",
+      "name": "피타마스크 키즈, 스위트",
+      "base_price": 7500,
+      "current_price": 7500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:11",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "ba33bdf8",
+      "url": "https://smartstore.naver.com/agatory/products/4513563943",
+      "name": "피타마스크 레귤러, 네이비",
+      "base_price": 7500,
+      "current_price": 7500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:11",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "1cd1a201",
+      "url": "https://smartstore.naver.com/agatory/products/3484651203",
+      "name": "일본 무인양품 휴대용 알루미늄 재떨이",
+      "base_price": 5500,
+      "current_price": 5500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:11",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "674fc732",
+      "url": "https://smartstore.naver.com/agatory/products/659313104",
+      "name": "시루콧토 화장솜 후키토리 실키 코튼 32매",
+      "base_price": 3100,
+      "current_price": 3100,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:11",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "a4e78446",
+      "url": "https://smartstore.naver.com/agatory/products/12769004074",
+      "name": "유니참 마스크 초쾌적 S 5매, 화이트",
+      "base_price": 3000,
+      "current_price": 3000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:12",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "6c09090a",
+      "url": "https://smartstore.naver.com/agatory/products/11972609418",
+      "name": "유니참 마스크 초입체 S 30매, 화이트",
+      "base_price": 6500,
+      "current_price": 6500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:12",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "447772f6",
+      "url": "https://smartstore.naver.com/agatory/products/11972605342",
+      "name": "유니참 마스크 초입체 M 30매, 화이트",
+      "base_price": 7500,
+      "current_price": 7500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:12",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "01303a5f",
+      "url": "https://smartstore.naver.com/agatory/products/11972599868",
+      "name": "유니참 마스크 초입체 L 30매, 화이트",
+      "base_price": 6500,
+      "current_price": 6500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:12",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "27047f94",
+      "url": "https://smartstore.naver.com/agatory/products/5222388932",
+      "name": "유니참 마스크 초쾌적 S 7매, 화이트",
+      "base_price": 6500,
+      "current_price": 6500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:12",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "e946f042",
+      "url": "https://smartstore.naver.com/agatory/products/5222388082",
+      "name": "유니참 마스크 초쾌적 M 7매, 화이트",
+      "base_price": 6500,
+      "current_price": 6500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:12",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "ee08da75",
+      "url": "https://smartstore.naver.com/agatory/products/5222375021",
+      "name": "유니참 마스크 초입체 S 7매, 화이트",
+      "base_price": 6500,
+      "current_price": 6500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:13",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "fb258757",
+      "url": "https://smartstore.naver.com/agatory/products/5222373192",
+      "name": "유니참 마스크 초입체 M 7매, 화이트",
+      "base_price": 6500,
+      "current_price": 6500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:13",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "25530bb6",
+      "url": "https://smartstore.naver.com/agatory/products/5222371711",
+      "name": "유니참 마스크 초입체 L 7매, 화이트",
+      "base_price": 6500,
+      "current_price": 6500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T14:25:13",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "bc5ae095",
+      "url": "https://smartstore.naver.com/agatory/products/11972517253",
+      "name": "유니참 마스크 초입체 서지컬 M 100매, 화이트",
+      "base_price": 13900,
+      "current_price": 13900,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:02",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "3d357452",
+      "url": "https://smartstore.naver.com/agatory/products/5675104165",
+      "name": "유니참 마스크 초입체 M 100매, 화이트",
+      "base_price": 13900,
+      "current_price": 13900,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:03",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "bd1bb720",
+      "url": "https://smartstore.naver.com/agatory/products/11972626763",
+      "name": "그린스낵 피스타치오 와사비맛 대용량",
+      "base_price": 12300,
+      "current_price": 12300,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:03",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "d69ea1ba",
+      "url": "https://smartstore.naver.com/agatory/products/12005478675",
+      "name": "일본 손바유 마유크림",
+      "base_price": 9500,
+      "current_price": 9500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:03",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "41e03eef",
+      "url": "https://smartstore.naver.com/agatory/products/2070112935",
+      "name": "비오레 아쿠아리치 워터에센스 선크림 워터젤 아이용 마일드 선크림 2017 리뉴얼",
+      "base_price": 8900,
+      "current_price": 8900,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:03",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "11782a07",
+      "url": "https://smartstore.naver.com/agatory/products/12005264941",
+      "name": "쿠라콘 시오콘부",
+      "base_price": 24800,
+      "current_price": 24800,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:04",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "f1adc678",
+      "url": "https://smartstore.naver.com/agatory/products/11972590996",
+      "name": "유니참 마스크 초쾌적 S 50매, 화이트",
+      "base_price": 18500,
+      "current_price": 18500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:04",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "3828e926",
+      "url": "https://smartstore.naver.com/agatory/products/11972587001",
+      "name": "유니참 마스크 초쾌적 M 50매, 화이트",
+      "base_price": 17500,
+      "current_price": 17500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:04",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "5b85ef01",
+      "url": "https://smartstore.naver.com/agatory/products/11972581557",
+      "name": "유니참 마스크 초쾌적 L 50매, 화이트",
+      "base_price": 18500,
+      "current_price": 18500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:04",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "63e72af2",
+      "url": "https://smartstore.naver.com/agatory/products/5222386644",
+      "name": "유니참 마스크 초쾌적 S 30매, 화이트",
+      "base_price": 15000,
+      "current_price": 15000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:05",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "959cacb6",
+      "url": "https://smartstore.naver.com/agatory/products/12135508113",
+      "name": "몰토베네 딥레이어 5R 극손상 프로페셔날 트리트먼트 리필",
+      "base_price": 23900,
+      "current_price": 23900,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:05",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "20a6f3cc",
+      "url": "https://smartstore.naver.com/agatory/products/5222385669",
+      "name": "유니참 마스크 초쾌적 M 30매, 화이트",
+      "base_price": 15000,
+      "current_price": 15000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:05",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "2be56460",
+      "url": "https://smartstore.naver.com/agatory/products/12764686704",
+      "name": "Dr Scholl 메디큐토 수면압박스타킹 쿨 슈퍼롱 아이스블루, L",
+      "base_price": 28500,
+      "current_price": 28500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:05",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "9495fbe7",
+      "url": "https://smartstore.naver.com/agatory/products/12759582173",
+      "name": "일본마유 설화 북해도 마유크림",
+      "base_price": 54500,
+      "current_price": 54500,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:06",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "657c656f",
+      "url": "https://smartstore.naver.com/agatory/products/12005971798",
+      "name": "일본마유 북해도 미유키 미설 마유크림",
+      "base_price": 52000,
+      "current_price": 52000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:06",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "e8155fcb",
+      "url": "https://smartstore.naver.com/agatory/products/5094804991",
+      "name": "국산 KF-AD 비말차단마스크 50매 식약처허가제품 의약외품 국내생산 미티오 덴탈마스크",
+      "base_price": 35000,
+      "current_price": 35000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:06",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "99000da5",
+      "url": "https://smartstore.naver.com/agatory/products/12664349368",
+      "name": "메이지 멜티키스 대용량 프리미엄 쇼콜라 초콜릿",
+      "base_price": 39000,
+      "current_price": 39000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T15:48:06",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
     }
   ],
   "check_state": {
     "in_progress": true,
-    "done": 569,
+    "done": 577,
     "total": 1555,
-    "started_at": "2026-06-18T12:48:21"
+    "started_at": "2026-06-18T12:48:58"
   }
 }
