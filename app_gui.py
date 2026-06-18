@@ -159,8 +159,8 @@ async def _rep_img_upload_endpoint(file: UploadFile = _FastAPIFile(...)):
         _tmp.close()
         _rel = Path(_tmp.name).name
         return {"ok": True, "path": _tmp.name, "url": f"/img/{_rel}"}
-    except Exception as _re:
-        return {"ok": False, "error": str(_re)}
+    except Exception as _exc:
+        return {"ok": False, "error": str(_exc)}
 
 
 @_app.post("/api/extra-img/url-upload")
@@ -2507,8 +2507,8 @@ async def _process_entry(
                             if _u:
                                 bundle_image_urls[_q] = _u
                     log_(f"[{entry.uid[:6]}] 배지 재합성 완료: {len(_composed2)}개")
-                except Exception as _re:
-                    log_(f"[{entry.uid[:6]}] 배지 재합성 실패 → 원본 업로드: {_re}")
+                except Exception as _exc:
+                    log_(f"[{entry.uid[:6]}] 배지 재합성 실패 → 원본 업로드: {_exc}")
                     _uploaded_custom = await loop.run_in_executor(
                         None, lambda p=_custom_img: upload_file(p)
                     )
@@ -3889,8 +3889,8 @@ def _restore_queue_from_state() -> list[QueueEntry]:
             if e.url:
                 result.append(e)
         return result
-    except Exception as _re:
-        print(f"[큐상태복원] 오류 (무시): {_re}")
+    except Exception as _exc:
+        print(f"[큐상태복원] 오류 (무시): {_exc}")
         return []
 
 
@@ -8163,8 +8163,8 @@ def page() -> None:
                 try:
                     await _regen_excel()
                     ui.notify("📋 엑셀 재생성 완료 (변경된 카테고리 반영)", type="info", timeout=2500)
-                except Exception as _re:
-                    ui.notify(f"⚠️ 엑셀 재생성 실패 (수동으로 재생성 버튼 클릭): {_re}", type="warning", timeout=4000)
+                except Exception as _exc:
+                    ui.notify(f"⚠️ 엑셀 재생성 실패 (수동으로 재생성 버튼 클릭): {_exc}", type="warning", timeout=4000)
 
         dlg.open()
 
