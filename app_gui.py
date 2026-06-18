@@ -10251,7 +10251,7 @@ def page() -> None:
                         log_cb=_log_cb,
                         progress_cb=_progress_cb,
                         product_data=_product_data,
-                        headless=False,
+                        headless=True,
                         gemini_api_key=getattr(_settings, "GEMINI_API_KEY", ""),
                     ),
                 )
