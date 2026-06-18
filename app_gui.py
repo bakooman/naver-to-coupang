@@ -2490,18 +2490,33 @@ async def _process_entry(
         # 대표이미지 (1개 번들 이미지 or custom 직접 업로드 or 네이버 원본)
         main_img = bundle_image_urls.get(1) or ""
         if not main_img:
-            # custom 이미지 설정 시 네이버 원본 절대 사용 안 함 — custom 직접 업로드
+            # custom 이미지 설정 시 네이버 원본 절대 사용 안 함 — 배지 다시 합성 시도
             if _custom_img and Path(_custom_img).exists():
-                log_(f"[{entry.uid[:6]}] 배지합성 실패 → custom 이미지 직접 업로드")
-                _uploaded_custom = await loop.run_in_executor(
-                    None, lambda p=_custom_img: upload_file(p)
-                )
-                if _uploaded_custom:
-                    main_img = _uploaded_custom
-                    # 모든 수량 이미지도 같은 custom 이미지로 채움
-                    for _q in entry.qtys:
-                        if _q not in bundle_image_urls:
-                            bundle_image_urls[_q] = _uploaded_custom
+                log_(f"[{entry.uid[:6]}] 배지합성 재시도 (skip_nobg=True) → custom 이미지")
+                try:
+                    _proc2 = ImageProcessor(_settings, store=getattr(entry, "watch_store", "샵케이"))
+                    _composed2 = await loop.run_in_executor(
+                        None,
+                        partial(_proc2.process, _custom_img,
+                                product.product_id, entry.qtys,
+                                skip_nobg=True),
+                    )
+                    for _q, _p in _composed2.items():
+                        if Path(_p).exists():
+                            _u = await loop.run_in_executor(None, lambda p=_p: upload_file(p))
+                            if _u:
+                                bundle_image_urls[_q] = _u
+                    log_(f"[{entry.uid[:6]}] 배지 재합성 완료: {len(_composed2)}개")
+                except Exception as _re:
+                    log_(f"[{entry.uid[:6]}] 배지 재합성 실패 → 원본 업로드: {_re}")
+                    _uploaded_custom = await loop.run_in_executor(
+                        None, lambda p=_custom_img: upload_file(p)
+                    )
+                    if _uploaded_custom:
+                        for _q in entry.qtys:
+                            if _q not in bundle_image_urls:
+                                bundle_image_urls[_q] = _uploaded_custom
+                main_img = bundle_image_urls.get(1) or ""
             elif product.image_url:
                 log_(f"[{entry.uid[:6]}] 원본 이미지 직접 업로드...")
                 _uploaded_main = await loop.run_in_executor(
