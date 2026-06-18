@@ -2487,19 +2487,32 @@ async def _process_entry(
                         log_(f"[{entry.uid[:6]}] {qty}개 이미지 업로드 실패 → 원본 URL 사용")
                         entry.r2_failed = True
 
-        # 대표이미지 (1개 번들 이미지 or 네이버 원본)
+        # 대표이미지 (1개 번들 이미지 or custom 직접 업로드 or 네이버 원본)
         main_img = bundle_image_urls.get(1) or ""
-        if not main_img and product.image_url:
-            log_(f"[{entry.uid[:6]}] 원본 이미지 직접 업로드...")
-            _uploaded_main = await loop.run_in_executor(
-                None, lambda: upload_url(product.image_url, f"{product.product_id}_main.jpg")
-            )
-            if _uploaded_main:
-                main_img = _uploaded_main
-            else:
-                main_img = product.image_url
-                entry.r2_failed = True
-                log_(f"[{entry.uid[:6]}] ⚠ R2 대표이미지 업로드 실패 → 네이버 원본 URL 폴백")
+        if not main_img:
+            # custom 이미지 설정 시 네이버 원본 절대 사용 안 함 — custom 직접 업로드
+            if _custom_img and Path(_custom_img).exists():
+                log_(f"[{entry.uid[:6]}] 배지합성 실패 → custom 이미지 직접 업로드")
+                _uploaded_custom = await loop.run_in_executor(
+                    None, lambda p=_custom_img: upload_file(p)
+                )
+                if _uploaded_custom:
+                    main_img = _uploaded_custom
+                    # 모든 수량 이미지도 같은 custom 이미지로 채움
+                    for _q in entry.qtys:
+                        if _q not in bundle_image_urls:
+                            bundle_image_urls[_q] = _uploaded_custom
+            elif product.image_url:
+                log_(f"[{entry.uid[:6]}] 원본 이미지 직접 업로드...")
+                _uploaded_main = await loop.run_in_executor(
+                    None, lambda: upload_url(product.image_url, f"{product.product_id}_main.jpg")
+                )
+                if _uploaded_main:
+                    main_img = _uploaded_main
+                else:
+                    main_img = product.image_url
+                    entry.r2_failed = True
+                    log_(f"[{entry.uid[:6]}] ⚠ R2 대표이미지 업로드 실패 → 네이버 원본 URL 폴백")
 
         # ── 3-b. 상세페이지 전용 클린 이미지 생성 및 R2 업로드 ────────
         # 배지(수량 스탬프) 절대 포함 금지 — process_detail() 은 _stamp_label() 미호출

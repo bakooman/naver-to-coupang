@@ -1,25 +1,25 @@
 [
   {
-    "uid": "ffaf442d",
+    "uid": "10b61aee",
     "url": "https://smartstore.naver.com/realspain/products/5036643128",
-    "brand": "알마자라스",
+    "brand": "",
     "qtys": [
       1,
       2,
       3
     ],
     "min_qty": 1,
-    "volume": 500.0,
-    "volume_unit": "ml",
+    "volume": 0.0,
+    "volume_unit": "L",
     "use_nobg": false,
     "draft": false,
     "gtin": "",
     "source_file": "",
-    "gosisi_cat": "가공식품",
-    "category_id": "73021",
+    "gosisi_cat": "기타 재화",
+    "category_id": "",
     "category_is_manual": false,
     "qty_locked": false,
-    "naver_price": 54000,
+    "naver_price": 0,
     "manual_options": [],
     "lead_time": 10,
     "single_mode": false,
@@ -29,6 +29,6 @@
     "price_extra": 0,
     "extra_detail_images": [],
     "extra_detail_text": "",
-    "status": "done"
+    "status": "processing"
   }
 ]

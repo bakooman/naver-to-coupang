@@ -1,5 +1,83 @@
 [
   {
+    "id": "20260618_162205",
+    "timestamp": "2026-06-18T16:22:05",
+    "label": "직접 추가",
+    "brand_label": "",
+    "count": 1,
+    "shipping_mode": "overseas",
+    "margin_rate": 1.28,
+    "entries": [
+      {
+        "url": "https://smartstore.naver.com/realspain/products/5036643128",
+        "brand": "",
+        "brand_locked": false,
+        "qtys": [
+          1,
+          2,
+          3
+        ],
+        "min_qty": 1,
+        "qty_locked": false,
+        "volume": 0.0,
+        "volume_unit": "L",
+        "use_nobg": false,
+        "draft": false,
+        "gtin": "",
+        "source_file": "",
+        "gosisi_cat": "기타 재화",
+        "category_id": "",
+        "category_is_manual": false,
+        "manual_options": [],
+        "lead_time": 10,
+        "lead_time_locked": false,
+        "watch_store": "제니스 트레이딩",
+        "price_extra": 0,
+        "extra_detail_images": [],
+        "extra_detail_text": ""
+      }
+    ]
+  },
+  {
+    "id": "20260618_161702",
+    "timestamp": "2026-06-18T16:17:02",
+    "label": "직접 추가",
+    "brand_label": "",
+    "count": 1,
+    "shipping_mode": "overseas",
+    "margin_rate": 1.28,
+    "entries": [
+      {
+        "url": "https://smartstore.naver.com/realspain/products/5036643128",
+        "brand": "",
+        "brand_locked": false,
+        "qtys": [
+          1,
+          2,
+          3
+        ],
+        "min_qty": 1,
+        "qty_locked": false,
+        "volume": 0.0,
+        "volume_unit": "L",
+        "use_nobg": false,
+        "draft": false,
+        "gtin": "",
+        "source_file": "",
+        "gosisi_cat": "기타 재화",
+        "category_id": "",
+        "category_is_manual": false,
+        "manual_options": [],
+        "lead_time": 10,
+        "lead_time_locked": false,
+        "watch_store": "제니스 트레이딩",
+        "price_extra": 0,
+        "extra_detail_images": [],
+        "extra_detail_text": ""
+      }
+    ]
+  },
+  {
     "id": "20260618_161142",
     "timestamp": "2026-06-18T16:11:42",
     "label": "직접 추가",
