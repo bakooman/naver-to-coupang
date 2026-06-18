@@ -2426,6 +2426,7 @@ async def _process_entry(
         # 단일 등록 모드: 누끼·배지 없이 원본 이미지 직접 업로드
         if entry.single_mode:
             log_(f"[{entry.uid[:6]}] [단일등록] 이미지 합성 스킵 — 원본 이미지 직접 사용")
+        log_(f"[{entry.uid[:6]}] 누끼={'ON' if use_nobg else 'OFF'} (entry.use_nobg={entry.use_nobg})")
         if not use_nobg and not entry.single_mode:
             log_(f"[{entry.uid[:6]}] 누끼 OFF — 원본 이미지 그대로 사용")
         composed: dict[int, str] = {}
