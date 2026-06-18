@@ -2924,6 +2924,7 @@ class WingAutomator:
                         # 그 외 에러는 이미 errors에 추가됨
                 elif _registered_by_confirm:
                     # 확인 팝업 클릭 후 최대 6초 대기 → 실제 Wing 상태 확인
+                    await asyncio.sleep(2)  # 팝업 클릭 후 Wing 처리 대기
                     _status_after = ""
                     for _wait in range(3):  # 2초씩 최대 3회 = 6초
                         await asyncio.sleep(2)
@@ -2931,7 +2932,8 @@ class WingAutomator:
                         if _status_after:
                             break
                     _url_changed = '/edit' not in pg.url and '/modify' not in pg.url
-                    log(f"[Wing 판매요청] 상태확인: status={_status_after or '미확인'} / URL변경={_url_changed}")
+                    _api_201 = any(c.get("status") == 201 for c in api_calls)
+                    log(f"[Wing 판매요청] 상태확인: status={_status_after or '미확인'} / URL변경={_url_changed} / API201={_api_201}")
                     if _status_after:
                         # Wing 상태가 실제로 변경됨 → 진짜 성공
                         published += 1
@@ -2943,10 +2945,16 @@ class WingAutomator:
                         published += 1
                         if prod_name:
                             published_names.append(prod_name)
-                        log(f"[Wing 판매요청] ✅ 등록 추정 (URL 전환, 상태배지 미확인) ({inv_id})")
+                        log(f"[Wing 판매요청] ✅ 등록 추정 (URL 전환) ({inv_id})")
+                    elif _api_201:
+                        # 팝업 확인 + API 201 → Wing 백엔드 등록 완료
+                        published += 1
+                        if prod_name:
+                            published_names.append(prod_name)
+                        log(f"[Wing 판매요청] ✅ 등록 성공 (팝업확인+API201) ({inv_id})")
                     else:
-                        # 상태도 안 바뀌고 URL도 안 바뀜 → 가짜 성공 차단
-                        log(f"[Wing 판매요청] ❌ 등록 실패 — 팝업 클릭했으나 상태 미변경 ({inv_id})")
+                        # 상태도 안 바뀌고 URL도 안 바뀌고 API 201도 없음
+                        log(f"[Wing 판매요청] ❌ 등록 실패 — 팝업 클릭했으나 상태/URL/API 미변경 ({inv_id})")
                         errors.append(f'등록실패(상태미변경)({prod_name[:20] if prod_name else inv_id})')
                         await self._shot(f"bulk_fail_{inv_id}")
                 else:
