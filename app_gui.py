@@ -10497,31 +10497,42 @@ def page_price_fix() -> None:
             tmp.close()
 
             try:
-                import pandas as _pd
-                df = _pd.read_excel(tmp.name, header=None, sheet_name="data")
+                import openpyxl as _opx
+                _wb_price = _opx.load_workbook(tmp.name, read_only=True, data_only=True)
+                # "data" 시트 우선, 없으면 첫 번째 시트
+                _ws_price = _wb_price["data"] if "data" in _wb_price.sheetnames else _wb_price.active
+                # 전체 행을 리스트로 로드
+                _all_rows = [[cell.value for cell in row] for row in _ws_price.iter_rows()]
+                _wb_price.close()
             except Exception as ex:
                 file_lbl.set_text(f"❌ 파싱 실패: {ex}")
                 file_lbl.classes(remove="text-slate-400 text-green-600", add="text-red-500")
                 return
 
-            # 헤더는 row 2 (0-indexed), 데이터는 row 3+
-            # 컬럼: 0=업체상품ID, 6=쿠팡노출명, 7=업체등록명, 8=옵션명, 9=판매가격
             _rows.clear()
 
-            # 헤더 행 탐지: 셀 값이 짧고 정확히 '업체상품 ID' / 'Product ID' 인 행
-            # (row0 설명 텍스트는 수천 자 → 길이 제한으로 제외)
-            _header_row = 2  # 기본값 (Wing 엑셀 표준)
+            def _cell_str(v):
+                if v is None:
+                    return ""
+                s = str(v).strip()
+                return "" if s in ("None", "nan") else s
+
+            def _is_empty(v):
+                return v is None or str(v).strip() in ("", "None", "nan")
+
+            # 헤더 행 탐지
+            _header_row = 2  # 기본값 (Wing 엑셀 표준, 0-indexed)
             _EXACT_HEADERS = {'업체상품 ID', '업체상품ID', 'Product ID', '옵션 ID', 'Option ID'}
-            for _ri in range(min(6, len(df))):
-                _short_vals = {str(v).strip() for v in df.iloc[_ri].tolist()
-                               if str(v) not in ('nan','None','') and len(str(v)) < 40}
+            for _ri in range(min(6, len(_all_rows))):
+                _short_vals = {_cell_str(v) for v in _all_rows[_ri]
+                               if not _is_empty(v) and len(_cell_str(v)) < 40}
                 if _short_vals & _EXACT_HEADERS:
                     _header_row = _ri
                     break
             _data_start = _header_row + 1
 
             # 컬럼 인덱스 헤더로부터 자동 감지
-            _hdr = [str(v) for v in df.iloc[_header_row].tolist()]
+            _hdr = [_cell_str(v) for v in _all_rows[_header_row]]
             def _col(candidates):
                 for c in candidates:
                     for i, h in enumerate(_hdr):
@@ -10532,7 +10543,7 @@ def page_price_fix() -> None:
             _col_expname  = _col(['쿠팡 노출 상품명', '노출 상품명'])
             _col_optname  = _col(['등록 옵션명', '옵션명'])
             _col_price    = _col(['판매가격'])
-            # 수정요청 열: 두 번째 '판매가격' (첫번째는 현재가, 두번째는 수정요청)
+            # 수정요청 열: 두 번째 '판매가격'
             _col_newprice = None
             _found_first  = False
             for _i, _h in enumerate(_hdr):
@@ -10544,7 +10555,6 @@ def page_price_fix() -> None:
 
             # 감지된 컬럼 정보 저장 (download에서 사용)
             _meta["data_start_row"] = _header_row + 2   # openpyxl 1-indexed: header=row3, data=row4
-            # 수정요청 열 우선, 없으면 현재가 열에 직접 기입 (단일 판매가격 열 구조)
             if _col_newprice is not None:
                 _meta["newprice_col"] = _col_newprice + 1
             elif _col_price is not None:
@@ -10554,8 +10564,9 @@ def page_price_fix() -> None:
 
             # 디버그 알림
             _alerts_cnt = len([w for w in _pc.all_watches() if w.status in ('risen','fallen')])
-            _sample_name = str(df.iloc[_data_start].iloc[_col_regname or 7]) if len(df) > _data_start else ''
-            _write_col_0idx = _meta["newprice_col"] - 1  # 0-indexed for display
+            _sample_row = _all_rows[_data_start] if len(_all_rows) > _data_start else []
+            _sample_name = _cell_str(_sample_row[_col_regname or 7]) if len(_sample_row) > (_col_regname or 7) else ""
+            _write_col_0idx = _meta["newprice_col"] - 1
             _write_col_hdr  = _hdr[_write_col_0idx] if _write_col_0idx < len(_hdr) else "?"
             ui.notify(
                 f"알림:{_alerts_cnt}개 | 헤더row:{_header_row} | 가격col:{_col_price} | "
@@ -10565,16 +10576,17 @@ def page_price_fix() -> None:
             )
 
             matched_cnt = 0
-            data_rows = df.iloc[_data_start:].reset_index(drop=True)
-            for _, row in data_rows.iterrows():
+            for row in _all_rows[_data_start:]:
                 _rn  = _col_regname  if _col_regname  is not None else 7
                 _en  = _col_expname  if _col_expname  is not None else 6
                 _on  = _col_optname  if _col_optname  is not None else 8
                 _pn  = _col_price    if _col_price     is not None else 9
-                excel_name = str(row.iloc[_rn]) if not _pd.isna(row.iloc[_rn]) else str(row.iloc[_en])
-                option_name = str(row.iloc[_on]) if not _pd.isna(row.iloc[_on]) else ""
+                _rv  = row[_rn] if _rn < len(row) else None
+                _ev  = row[_en] if _en < len(row) else None
+                excel_name = _cell_str(_rv) if not _is_empty(_rv) else _cell_str(_ev)
+                option_name = _cell_str(row[_on]) if _on < len(row) else ""
                 try:
-                    cur_price = int(float(str(row.iloc[_pn])))
+                    cur_price = int(float(str(row[_pn]))) if _pn < len(row) and not _is_empty(row[_pn]) else 0
                 except Exception:
                     cur_price = 0
 
