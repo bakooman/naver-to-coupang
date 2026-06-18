@@ -372,16 +372,6 @@ class NaverStoreCrawler:
 
         product = self._build(url, store, pid, raw)
 
-        # ── UNIT_QUANTITY_PAID이지만 bundle_unit 미확인 → Playwright DOM 추출 ─
-        # __PRELOADED_STATE__ 에는 bundle count 가 없음 (JS 렌더링 후에만 노출)
-        if (product.delivery.fee_type == "UNIT_QUANTITY_PAID"
-                and product.delivery.bundle_unit is None):
-            _bu = await self._fetch_bundle_unit_playwright(url)
-            if _bu:
-                product.delivery.bundle_unit = _bu
-                product.delivery.bundle_fee  = product.delivery.base_fee
-                print(f"[Crawler] bundle  : Playwright 추출 — {_bu}개마다 {product.delivery.base_fee:,}원")
-
         product.local_image_path = await self._download_image(
             product.image_url, product.product_id
         )
@@ -930,70 +920,6 @@ class NaverStoreCrawler:
 
             finally:
                 await browser.close()
-
-    async def _fetch_bundle_unit_playwright(self, url: str) -> Optional[int]:
-        """
-        UNIT_QUANTITY_PAID 배송비의 'N개마다' 단위를 Playwright DOM에서 추출.
-        __PRELOADED_STATE__ 에는 이 값이 없고, React 앱이 API 호출 후 DOM에만 노출됨.
-        """
-        try:
-            from playwright.async_api import async_playwright  # type: ignore
-        except ImportError:
-            print("[Crawler] Playwright 미설치 — bundle_unit 추출 불가")
-            return None
-
-        print(f"[Crawler] UNIT_QUANTITY_PAID bundle_unit 미확인 — Playwright DOM 추출 시작")
-        try:
-            async with async_playwright() as _pw:
-                _br = await _pw.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-                )
-                _ctx = await _br.new_context(
-                    user_agent=self._HEADERS["User-Agent"],
-                    locale="ko-KR",
-                    timezone_id="Asia/Seoul",
-                    viewport={"width": 1280, "height": 800},
-                )
-                _pg = await _ctx.new_page()
-                try:
-                    await _pg.goto(url.split("?")[0], wait_until="domcontentloaded", timeout=25_000)
-
-                    # React 앱이 배송비 텍스트 렌더링할 때까지 최대 12초 대기
-                    try:
-                        await _pg.wait_for_function(
-                            r"() => /\d+\s*개\s*마다\s*부과/.test(document.body.innerText)",
-                            timeout=12_000,
-                        )
-                    except Exception:
-                        await asyncio.sleep(3)  # 타임아웃 시 3초 추가 대기 후 시도
-
-                    # DOM innerText 에서 추출
-                    _result = await _pg.evaluate(r"""
-                        () => {
-                            const t = document.body ? document.body.innerText : '';
-                            const m = t.match(/(\d+)\s*개\s*마다\s*부과/);
-                            return m ? parseInt(m[1], 10) : null;
-                        }
-                    """)
-                    if _result:
-                        print(f"[Crawler] bundle_unit DOM innerText 추출: {_result}")
-                        return int(_result)
-
-                    # innerText 실패 시 page HTML 에서 재시도
-                    _html = await _pg.content()
-                    _m = re.search(r"(\d+)\s*개\s*마다\s*부과", _html)
-                    if _m:
-                        print(f"[Crawler] bundle_unit HTML 추출: {_m.group(1)}")
-                        return int(_m.group(1))
-
-                    print("[Crawler] bundle_unit Playwright 추출 실패 — 텍스트 미발견")
-                    return None
-                finally:
-                    await _br.close()
-        except Exception as _e:
-            print(f"[Crawler] bundle_unit Playwright 오류: {_e}")
-            return None
 
     @staticmethod
     def _install_chromium() -> bool:

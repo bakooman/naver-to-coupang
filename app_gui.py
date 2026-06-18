@@ -409,6 +409,7 @@ class QueueEntry:
     extra_detail_images:  list[str]  = field(default_factory=list)  # 상세 이미지 하단 추가 이미지 URL 목록
     extra_detail_text:    str        = ""          # 상세 이미지 하단 추가 텍스트 (이미지로 렌더링)
     custom_image_path:    str        = ""          # 사용자 지정 대표이미지 로컬 경로 — 설정 시 네이버 원본 이미지 대체
+    bundle_unit:          int        = 0           # N개마다 배송비 부과 단위 (0=미사용/단일배송비, >0=N개마다 추가)
     # 사용자가 직접 지정한 추가 옵션 (자동 추출 옵션 뒤에 병합됨)
     # 예: [("색상", "블랙"), ("사이즈", "M")]
 
@@ -2578,6 +2579,11 @@ async def _process_entry(
         )
 
         # ── 4. 가격 산출 (단일 마진율) ──────────────────────────────
+        # bundle_unit 수동 설정 시 product.delivery에 주입 (크롤러가 못 잡은 경우 대체)
+        if entry.bundle_unit > 0 and product.delivery.fee_type != "FREE":
+            product.delivery.bundle_unit = entry.bundle_unit
+            product.delivery.bundle_fee  = product.delivery.base_fee
+            log_(f"[{entry.uid[:6]}] 배송비 수동: {entry.bundle_unit}개마다 {product.delivery.base_fee:,}원 부과")
         bp_list = PriceCalculator(_settings).calculate(
             product, quantities=entry.qtys,
             sale_rate=margin_rate, original_rate=margin_rate,
@@ -3740,6 +3746,7 @@ def _save_collection_history(
                 "price_extra":       getattr(e, "price_extra", 0),
                 "extra_detail_images": list(getattr(e, "extra_detail_images", None) or []),
                 "extra_detail_text": getattr(e, "extra_detail_text", ""),
+                "bundle_unit":       getattr(e, "bundle_unit", 0),
             })
 
         if not serialized:
@@ -3812,6 +3819,7 @@ _QUEUE_SAVE_FIELDS = (
     "manual_options", "lead_time",
     "single_mode", "single_selected_imgs", "margin_override",
     "watch_store", "price_extra", "extra_detail_images", "extra_detail_text",
+    "bundle_unit",
     "status",  # 복원 시 processing → pending 으로 리셋
 )
 
@@ -3882,6 +3890,7 @@ def _restore_queue_from_state() -> list[QueueEntry]:
                 price_extra      = int(row.get("price_extra") or 0),
                 extra_detail_images = list(row.get("extra_detail_images") or []),
                 extra_detail_text   = row.get("extra_detail_text", ""),
+                bundle_unit         = int(row.get("bundle_unit") or 0),
                 status           = _st,
             )
             if e.url:
@@ -9389,6 +9398,27 @@ def page() -> None:
                                 _r_min_inp.on_value_change(_hdl)
                                 _r_qty_inp.on_value_change(_hdl)
 
+                                # N개마다 배송비 — done/error 상태에서도 수정 가능
+                                with ui.row().classes("items-center gap-1 ml-2"):
+                                    _r_bu_inp = ui.number(
+                                        value=entry.bundle_unit if entry.bundle_unit > 0 else None,
+                                        placeholder="N",
+                                        min=1, max=99, step=1, format="%.0f",
+                                    ).props("dense outlined").style("width:52px").tooltip(
+                                        "N개마다 배송비 부과 단위 (예: 2 → 2개마다 배송비 추가)\n비워두면 배송비 1회 고정"
+                                    )
+                                    ui.label("개마다 배송비").classes("text-xs text-orange-300")
+                                    def _make_r_bu_handler(e_ref=entry, inp=_r_bu_inp):
+                                        def _h(ev=None):
+                                            try:
+                                                v = int(inp.value or 0)
+                                            except Exception:
+                                                v = 0
+                                            e_ref.bundle_unit = max(0, v)
+                                        return _h
+                                    _r_bu_inp.on("blur", _make_r_bu_handler())
+                                    _r_bu_inp.on_value_change(_make_r_bu_handler())
+
                         # 하단: 브랜드 / 용량 (pending 상태에서만 편집 가능)
                         if entry.status == "pending":
                             with ui.row().classes("gap-2 mt-1 flex-wrap items-center"):
@@ -9537,6 +9567,27 @@ def page() -> None:
                                 ui.button("📦 수량 설정", on_click=_make_qty_dialog_opener()).props(
                                     "flat dense size=sm color=cyan"
                                 ).classes("text-xs font-bold")
+
+                                # ── N개마다 배송비 수동 입력 ─────────────────────
+                                with ui.row().classes("items-center gap-1"):
+                                    _bu_inp = ui.number(
+                                        value=entry.bundle_unit if entry.bundle_unit > 0 else None,
+                                        placeholder="N",
+                                        min=1, max=99, step=1, format="%.0f",
+                                    ).props("dense outlined").style("width:52px").tooltip(
+                                        "N개마다 배송비 부과 단위 (예: 2 → 2개마다 배송비 추가)\n비워두면 배송비 1회 고정"
+                                    )
+                                    ui.label("개마다 배송비").classes("text-xs text-orange-300")
+                                    def _make_bu_handler(e_ref=entry, inp=_bu_inp):
+                                        def _h(ev=None):
+                                            try:
+                                                v = int(inp.value or 0)
+                                            except Exception:
+                                                v = 0
+                                            e_ref.bundle_unit = max(0, v)
+                                        return _h
+                                    _bu_inp.on("blur", _make_bu_handler())
+                                    _bu_inp.on_value_change(_make_bu_handler())
 
                                 # 용량 — 엔진오일 카테고리일 때만 표시
                                 _OIL_CATS = {"78889", "78903", "78894"}
@@ -10190,22 +10241,17 @@ def page_price_fix() -> None:
                             row_num = int(_re2.sub(r'[A-Z]+', '', ref))
                             replaced = False
 
-                            # Wing Excel은 모든 셀을 t="inlineStr" + <is><t>값</t></is> 형태로 저장.
-                            # <v> 숫자 형태로 쓰면 Wing이 읽지 못함 → inlineStr로 써야 함.
-                            sp = str(new_price)
+                            # Wing 가격열은 numeric <v> 형식이어야 업로드 인식됨 (inlineStr 거부)
+                            sp = str(int(new_price)) if isinstance(new_price, float) and new_price == int(new_price) else str(new_price)
 
                             def _replacer(m, _sp=sp):
                                 inner = m.group(0)
-                                if '<is' in inner:
-                                    # inlineStr 셀: <t xml:space="preserve"> 등 속성 있는 경우도 처리
-                                    return _re2.sub(r'<t[^>]*>[^<]*</t>', f'<t>{_sp}</t>', inner, count=1)
-                                if '<v>' in inner:
-                                    # 숫자 셀: <v> 교체 후 t속성 제거
-                                    r2 = _re2.sub(r'<v>[^<]*</v>', f'<v>{_sp}</v>', inner)
-                                    return _re2.sub(r'\s*t="[^"]*"', '', r2, count=1)
-                                # 빈 셀 (<c r="P4" s="11"></c>): inlineStr로 채움
+                                # t 속성 제거
                                 r2 = _re2.sub(r'\s*t="[^"]*"', '', inner, count=1)
-                                return _re2.sub(r'></c>$', f' t="inlineStr"><is><t>{_sp}</t></is></c>', r2)
+                                # 기존 값 태그(inlineStr 또는 numeric) 제거
+                                r2 = _re2.sub(r'<is>.*?</is>|<v>[^<]*</v>', '', r2, flags=_re2.DOTALL)
+                                # t="n" 명시 + <v> 삽입 (openpyxl 호환 형식)
+                                return _re2.sub(r'>\s*</c>$', f' t="n"><v>{_sp}</v></c>', r2)
 
                             pat_full = (r'<c\b[^>]*\br="'
                                         + _re2.escape(ref)
@@ -10220,7 +10266,7 @@ def page_price_fix() -> None:
                                 def _replacer_self(m, _sp=sp):
                                     inner = _re2.sub(r'\s*t="[^"]*"', '', m.group(0))
                                     return _re2.sub(r'\s*/>\s*$',
-                                                    f' t="inlineStr"><is><t>{_sp}</t></is></c>', inner)
+                                                    f' t="n"><v>{_sp}</v></c>', inner)
 
                                 pat_self = (r'<c\b[^>]*\br="'
                                             + _re2.escape(ref)
@@ -10235,7 +10281,7 @@ def page_price_fix() -> None:
                                 row_pat = (r'(<row\b[^>]*\br="'
                                            + str(row_num)
                                            + r'"[^>]*>)((?:(?!</row>).)*)(</row>)')
-                                new_cell = f'<c r="{ref}" t="inlineStr"><is><t>{sp}</t></is></c>'
+                                new_cell = f'<c r="{ref}" t="n"><v>{sp}</v></c>'
 
                                 def _insert(m, _nc=new_cell, _cl=col_letter, _rn=row_num):
                                     content = m.group(2)
@@ -10371,12 +10417,20 @@ def page_price_fix() -> None:
 
             try:
                 import openpyxl as _opx
-                _wb_price = _opx.load_workbook(tmp.name, read_only=True, data_only=True)
-                # "data" 시트 우선, 없으면 첫 번째 시트
-                _ws_price = _wb_price["data"] if "data" in _wb_price.sheetnames else _wb_price.active
-                # 전체 행을 리스트로 로드
-                _all_rows = [[cell.value for cell in row] for row in _ws_price.iter_rows()]
+                _wb_price = _opx.load_workbook(tmp.name, data_only=True)
+                # 모든 시트 중 데이터 행이 가장 많은 시트 선택
+                _best_sheet_name = _wb_price.active.title
+                _all_rows = []
+                _best_count = 0
+                for _sname in _wb_price.sheetnames:
+                    _srows = [[cell.value for cell in row] for row in _wb_price[_sname].iter_rows()]
+                    _nonempty = sum(1 for r in _srows if any(v is not None for v in r))
+                    if _nonempty > _best_count:
+                        _best_count = _nonempty
+                        _best_sheet_name = _sname
+                        _all_rows = _srows
                 _wb_price.close()
+                _meta["sheet_name"] = _best_sheet_name
             except Exception as ex:
                 file_lbl.set_text(f"❌ 파싱 실패: {ex}")
                 file_lbl.classes(remove="text-slate-400 text-green-600", add="text-red-500")
@@ -10442,7 +10496,8 @@ def page_price_fix() -> None:
             _write_col_0idx = _meta["newprice_col"] - 1
             _write_col_hdr  = _hdr[_write_col_0idx] if _write_col_0idx < len(_hdr) else "?"
             ui.notify(
-                f"알림:{_alerts_cnt}개 | 헤더row:{_header_row} | 가격col:{_col_price} | "
+                f"시트:{_meta.get('sheet_name','?')} | 총행:{len(_all_rows)} | 알림:{_alerts_cnt}개 | "
+                f"헤더row:{_header_row} | 가격col:{_col_price} | "
                 f"수정col:{_col_newprice} | 기입열:{_meta['newprice_col']}({_write_col_hdr}) | "
                 f"샘플:{_sample_name[:25]}",
                 timeout=20000, type="info"
