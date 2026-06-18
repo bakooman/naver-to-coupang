@@ -121092,6 +121092,20 @@
       "history": [],
       "acked": false,
       "store": "제니스 트레이딩"
+    },
+    {
+      "uid": "6373ee14",
+      "url": "https://smartstore.naver.com/realspain/products/5036643128",
+      "name": "[알마자라스] 링콘델라수베티카 엑스트라버진 올리브오일 (햇올리브)",
+      "base_price": 54000,
+      "current_price": 54000,
+      "status": "ok",
+      "change": 0,
+      "last_checked": "",
+      "added": "2026-06-18T16:01:04",
+      "history": [],
+      "acked": false,
+      "store": "제니스 트레이딩"
     }
   ],
   "check_state": {
