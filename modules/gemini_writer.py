@@ -76,57 +76,86 @@ def _extract_specs(raw_json: dict, depth: int = 0) -> dict[str, str]:
 
 def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
     """
-    Playwright (sync) 로 HTML → PNG 이미지 bytes 렌더링.
-    쿠팡 상세페이지 권장 너비 780px 기준.
+    PIL + BeautifulSoup 으로 HTML → PNG 이미지 bytes 렌더링.
+    Playwright/Chromium 없이 서버에서 동작.
     """
     try:
-        from playwright.sync_api import sync_playwright
+        import io
+        import textwrap as _tw
+        from bs4 import BeautifulSoup
+        from PIL import Image as _Img, ImageDraw as _Draw, ImageFont as _Font
 
-        full_html = f"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
-    font-size: 15px;
-    line-height: 1.7;
-    color: #222;
-    background: #fff;
-    padding: 32px 28px;
-    width: {width}px;
-  }}
-  h3 {{
-    font-size: 18px;
-    font-weight: 700;
-    color: #1a1a1a;
-    margin: 20px 0 10px;
-    padding-bottom: 6px;
-    border-bottom: 2px solid #e8e8e8;
-  }}
-  h3:first-child {{ margin-top: 0; }}
-  p {{ margin: 8px 0; color: #444; }}
-  ul {{ padding-left: 18px; margin: 8px 0; }}
-  li {{ margin: 4px 0; color: #444; }}
-  b {{ color: #222; }}
-</style>
-</head>
-<body>
-{html_body}
-</body>
-</html>"""
+        _FONT_PATHS = [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "C:/Windows/Fonts/malgunsl.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+            "data/fonts/NotoSansKR-Light.otf",
+        ]
 
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": width, "height": 800})
-            page.set_content(full_html, wait_until="domcontentloaded")
-            # 실제 콘텐츠 높이에 맞게 뷰포트 조정
-            height = page.evaluate("document.body.scrollHeight")
-            page.set_viewport_size({"width": width, "height": max(height, 100)})
-            img_bytes = page.screenshot(full_page=True)
-            browser.close()
-            return img_bytes
+        def _font(size: int) -> _Font.ImageFont:
+            for p in _FONT_PATHS:
+                try:
+                    return _Font.truetype(p, size)
+                except Exception:
+                    pass
+            return _Font.load_default()
+
+        soup = BeautifulSoup(html_body, "html.parser")
+
+        # ── 렌더링할 블록 수집 ────────────────────────────────
+        # (tag, text) 리스트
+        blocks: list[tuple[str, str]] = []
+        for el in soup.find_all(["h3", "p", "li"]):
+            text = el.get_text(" ", strip=True)
+            if text:
+                blocks.append((el.name, text))
+
+        if not blocks:
+            return None
+
+        PAD_X     = 32
+        PAD_Y     = 28
+        LINE_H_P  = 26   # p/li 행 간격
+        LINE_H_H3 = 34   # h3 행 간격
+        FONT_P    = _font(16)
+        FONT_H3   = _font(20)
+        CHAR_W    = width - PAD_X * 2  # 텍스트 가용 픽셀 폭
+        WRAP_W    = max(20, CHAR_W // 10)  # 한 줄 최대 문자 수 (한글 기준 ~10px)
+
+        # ── 1패스: 총 높이 계산 ───────────────────────────────
+        total_h = PAD_Y
+        for tag, text in blocks:
+            if tag == "h3":
+                total_h += LINE_H_H3 + 8 + 14  # 텍스트 + 밑줄여백 + 단락여백
+            else:
+                prefix = "• " if tag == "li" else ""
+                wrapped = _tw.wrap(prefix + text, width=WRAP_W) or [prefix + text]
+                total_h += len(wrapped) * LINE_H_P + 6
+        total_h += PAD_Y
+
+        # ── 2패스: 실제 그리기 ────────────────────────────────
+        img = _Img.new("RGB", (width, max(total_h, 100)), (255, 255, 255))
+        draw = _Draw.Draw(img)
+        y = PAD_Y
+
+        for tag, text in blocks:
+            if tag == "h3":
+                draw.text((PAD_X, y), text, font=FONT_H3, fill=(26, 26, 26))
+                y += LINE_H_H3
+                draw.line([(PAD_X, y), (width - PAD_X, y)], fill=(220, 220, 220), width=2)
+                y += 8 + 14
+            else:
+                prefix = "• " if tag == "li" else ""
+                wrapped = _tw.wrap(prefix + text, width=WRAP_W) or [prefix + text]
+                for line in wrapped:
+                    draw.text((PAD_X, y), line, font=FONT_P, fill=(68, 68, 68))
+                    y += LINE_H_P
+                y += 6
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
 
     except Exception as e:
         print(f"[Gemini] HTML→이미지 렌더링 실패: {e}")
