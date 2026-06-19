@@ -121,17 +121,43 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         FONT_P    = _font(16)
         FONT_H3   = _font(20)
         CHAR_W    = width - PAD_X * 2  # 텍스트 가용 픽셀 폭
-        WRAP_W    = max(20, CHAR_W // 10)  # 한 줄 최대 문자 수 (한글 기준 ~10px)
+
+        # 한글 문자 실제 폭을 PIL로 측정해서 줄바꿈 계산
+        def _measure(text: str, font) -> int:
+            try:
+                return int(font.getlength(text))
+            except Exception:
+                try:
+                    return font.getbbox(text)[2]
+                except Exception:
+                    return len(text) * 16
+
+        def _wrap_text(text: str, font, max_w: int) -> list[str]:
+            """픽셀 폭 기준 텍스트 줄바꿈."""
+            if _measure(text, font) <= max_w:
+                return [text]
+            lines, cur = [], ""
+            for ch in text:
+                if _measure(cur + ch, font) > max_w:
+                    if cur:
+                        lines.append(cur)
+                    cur = ch
+                else:
+                    cur += ch
+            if cur:
+                lines.append(cur)
+            return lines or [text]
 
         # ── 1패스: 총 높이 계산 ───────────────────────────────
         total_h = PAD_Y
         for tag, text in blocks:
             if tag == "h3":
-                total_h += LINE_H_H3 + 8 + 14  # 텍스트 + 밑줄여백 + 단락여백
+                lines_h3 = _wrap_text(text, FONT_H3, CHAR_W)
+                total_h += len(lines_h3) * LINE_H_H3 + 8 + 14
             else:
                 prefix = "• " if tag == "li" else ""
-                wrapped = _tw.wrap(prefix + text, width=WRAP_W) or [prefix + text]
-                total_h += len(wrapped) * LINE_H_P + 6
+                lines_p = _wrap_text(prefix + text, FONT_P, CHAR_W)
+                total_h += len(lines_p) * LINE_H_P + 6
         total_h += PAD_Y
 
         # ── 2패스: 실제 그리기 ────────────────────────────────
@@ -141,14 +167,14 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
 
         for tag, text in blocks:
             if tag == "h3":
-                draw.text((PAD_X, y), text, font=FONT_H3, fill=(26, 26, 26))
-                y += LINE_H_H3
+                for line in _wrap_text(text, FONT_H3, CHAR_W):
+                    draw.text((PAD_X, y), line, font=FONT_H3, fill=(26, 26, 26))
+                    y += LINE_H_H3
                 draw.line([(PAD_X, y), (width - PAD_X, y)], fill=(220, 220, 220), width=2)
                 y += 8 + 14
             else:
                 prefix = "• " if tag == "li" else ""
-                wrapped = _tw.wrap(prefix + text, width=WRAP_W) or [prefix + text]
-                for line in wrapped:
+                for line in _wrap_text(prefix + text, FONT_P, CHAR_W):
                     draw.text((PAD_X, y), line, font=FONT_P, fill=(68, 68, 68))
                     y += LINE_H_P
                 y += 6
