@@ -3820,7 +3820,7 @@ _QUEUE_SAVE_FIELDS = (
     "manual_options", "lead_time",
     "single_mode", "single_selected_imgs", "margin_override",
     "watch_store", "price_extra", "extra_detail_images", "extra_detail_text",
-    "bundle_unit",
+    "bundle_unit", "custom_image_path",
     "status",  # 복원 시 processing → pending 으로 리셋
 )
 
