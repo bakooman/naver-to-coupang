@@ -3747,6 +3747,7 @@ def _save_collection_history(
                 "extra_detail_images": list(getattr(e, "extra_detail_images", None) or []),
                 "extra_detail_text": getattr(e, "extra_detail_text", ""),
                 "bundle_unit":       getattr(e, "bundle_unit", 0),
+                "custom_image_path": getattr(e, "custom_image_path", ""),
             })
 
         if not serialized:
@@ -7841,6 +7842,8 @@ def page() -> None:
                                 price_extra       = int(_ed.get("price_extra") or 0),
                                 extra_detail_images = list(_ed.get("extra_detail_images") or []),
                                 extra_detail_text   = _ed.get("extra_detail_text", ""),
+                                bundle_unit         = int(_ed.get("bundle_unit") or 0),
+                                custom_image_path   = _ed.get("custom_image_path", ""),
                             )
                             queue.append(_new_e)
                             _added += 1
