@@ -8528,176 +8528,115 @@ def page() -> None:
                                 "font-size:13px; font-weight:600; padding:4px 12px"
                             ).tooltip("상세페이지 하단 추가 이미지/텍스트 설정")
 
-                            # ── 대표이미지 수정 버튼 ─────────────────────────
+                            # ── 대표이미지 수정 버튼 (클릭 → Ctrl+V 즉시 저장) ──────
                             def _make_rep_img_handler(e_ref=entry):
                                 async def _h():
-                                    _cur_path = getattr(e_ref, "custom_image_path", "") or ""
-                                    _cur_url  = f"/img/{Path(_cur_path).name}" if _cur_path and Path(_cur_path).exists() else ""
-                                    _rep_pz_id = f"rpz_{e_ref.uid}"
-                                    _rep_path_holder: list[str] = [_cur_path]
+                                    _hid = f"rph_{e_ref.uid}"
+                                    ui.notify(
+                                        "📋 Ctrl+V로 이미지 붙여넣기 (30초 대기)",
+                                        type="info", timeout=4000,
+                                    )
 
-                                    async def _save_rep(e=e_ref, ph=_rep_path_holder, pzid=_rep_pz_id):
+                                    # 0.5초마다 JS holder 확인 → 경로 저장
+                                    _tmr: list = [None]
+
+                                    async def _poll():
                                         try:
-                                            js_path = await ui.run_javascript(
-                                                f'(document.getElementById("{pzid}")||{{}}).getAttribute("data-rep-path")||""'
+                                            ready = await ui.run_javascript(
+                                                f'(document.getElementById("{_hid}")||{{}}).getAttribute("data-ready")||"0"'
                                             )
-                                            if js_path:
-                                                ph[0] = js_path
+                                            if ready != "1":
+                                                return
+                                            path = await ui.run_javascript(
+                                                f'(document.getElementById("{_hid}")||{{}}).getAttribute("data-path")||""'
+                                            )
+                                            if _tmr[0]:
+                                                _tmr[0].cancel()
+                                            if path and Path(path).exists():
+                                                e_ref.custom_image_path = path
+                                                ui.notify("✅ 대표이미지 변경됨", type="positive", timeout=2000)
+                                                _render_queue()
+                                            else:
+                                                ui.notify("이미지 저장 실패", type="negative", timeout=2000)
                                         except Exception:
-                                            pass
-                                        if ph[0] and Path(ph[0]).exists():
-                                            e.custom_image_path = ph[0]
-                                            _rdlg.close()
-                                            ui.notify("대표이미지 저장됨", type="positive", timeout=2000)
-                                            _render_queue()
-                                        else:
-                                            ui.notify("이미지를 먼저 선택해주세요", type="warning")
+                                            if _tmr[0]:
+                                                _tmr[0].cancel()
 
-                                    with ui.dialog() as _rdlg, ui.card().classes("p-4").style("min-width:420px; max-width:560px"):
-                                        ui.label("🖼 대표이미지 수정").classes("text-base font-bold text-slate-700 mb-1")
-                                        ui.label(
-                                            "설정하면 네이버 원본 이미지 대신 이 이미지로 수량 배지를 합성합니다.\n"
-                                            "상세페이지 기본 이미지도 이 이미지로 대체됩니다."
-                                        ).classes("text-xs text-slate-500 whitespace-pre-line mb-3")
-
-                                        _prev_html = ui.html(
-                                            f'<img src="{_cur_url}" style="max-width:100%;max-height:200px;border-radius:6px;border:1px solid #334155;" />'
-                                            if _cur_url else
-                                            '<div style="width:100%;height:80px;display:flex;align-items:center;justify-content:center;'
-                                            'border:1px dashed #475569;border-radius:6px;color:#64748b;font-size:12px;">이미지 없음 (네이버 원본 사용)</div>'
+                                    _tmr[0] = ui.timer(0.5, _poll)
+                                    # 30초 후 자동 취소
+                                    async def _expire():
+                                        if _tmr[0]:
+                                            _tmr[0].cancel()
+                                        await ui.run_javascript(
+                                            f'var h=document.getElementById("{_hid}");'
+                                            f'if(h&&h._rph_cleanup)h._rph_cleanup();'
                                         )
+                                    ui.timer(30, _expire, once=True)
 
-                                        async def _on_rep_file(ev, _ph=_rep_path_holder, _prev=_prev_html):
-                                            try:
-                                                if hasattr(ev, "file") and ev.file is not None:
-                                                    _fb = await ev.file.read()
-                                                    _fn = getattr(ev.file, "name", "") or getattr(ev, "name", "img.jpg")
-                                                else:
-                                                    _fb = ev.content.read()
-                                                    _fn = getattr(ev, "name", "img.jpg")
-                                                _ext2 = (_fn.rsplit(".", 1)[-1] or "png").lower()
-                                                _ext2 = _ext2 if _ext2 in ("jpg", "jpeg", "png", "webp") else "png"
-                                                import tempfile as _tf_ri
-                                                _tmp2 = _tf_ri.NamedTemporaryFile(
-                                                    delete=False, suffix=f".{_ext2}", dir=str(_IMG_ROOT), prefix="repimg_"
-                                                )
-                                                _tmp2.write(_fb)
-                                                _tmp2.close()
-                                                _ph[0] = _tmp2.name
-                                                _purl2 = f"/img/{Path(_tmp2.name).name}"
-                                                _prev.set_content(f'<img src="{_purl2}?t={id(_tmp2)}" style="max-width:100%;max-height:200px;border-radius:6px;border:1px solid #334155;" />')
-                                                ui.notify("이미지 선택됨", type="positive", timeout=1500)
-                                            except Exception as _ue2:
-                                                ui.notify(f"오류: {_ue2}", type="negative")
-
-                                        ui.upload(
-                                            label="📁 파일 선택",
-                                            on_upload=_on_rep_file,
-                                            auto_upload=True,
-                                            multiple=False,
-                                        ).props("accept=.jpg,.jpeg,.png,.webp flat dense color=grey-7").classes("mt-2")
-
-                                        ui.html(
-                                            f'<div id="{_rep_pz_id}" tabindex="0" '
-                                            f'style="border:2px dashed #64748b;border-radius:8px;padding:16px;margin-top:10px;'
-                                            f'text-align:center;color:#94a3b8;font-size:13px;cursor:pointer;'
-                                            f'background:#1e293b;outline:none;">'
-                                            f'📋 이미지 복사 후 <b>Ctrl+V</b> 붙여넣기<br>'
-                                            f'<span style="font-size:11px;color:#64748b">또는 파일을 드래그&드롭</span>'
-                                            f'</div>'
-                                        )
-
-                                        with ui.row().classes("gap-2 justify-end mt-3 w-full"):
-                                            if _cur_path:
-                                                def _clear_rep(e=e_ref, d=_rdlg):
-                                                    e.custom_image_path = ""
-                                                    d.close()
-                                                    ui.notify("대표이미지 초기화 (네이버 원본 사용)", type="info", timeout=2000)
-                                                    _render_queue()
-                                                ui.button("초기화", on_click=_clear_rep).props("flat dense color=grey")
-                                            ui.button("취소", on_click=_rdlg.close).props("flat dense")
-                                            ui.button("저장", on_click=_save_rep).props("color=blue dense")
-
-                                        _rzid = _rep_pz_id
-                                        await ui.run_javascript(f"""
+                                    await ui.run_javascript(f"""
 (function(){{
-  var _rzid="{_rzid}";
-  function initRepZone(){{
-    var zone=document.getElementById(_rzid);
-    if(!zone){{setTimeout(initRepZone,100);return;}}
-    if(zone._rzInited)return;
-    zone._rzInited=true;
-    function resetZone(){{
-      zone.style.borderColor="#64748b";
-      zone.innerHTML='📋 이미지 복사 후 <b>Ctrl+V</b> 붙여넣기<br><span style="font-size:11px;color:#64748b">또는 파일을 드래그&드롭</span>';
-    }}
-    function uploadBlob(blob){{
-      zone.style.borderColor="#f59e0b";
-      zone.innerHTML="⏳ 업로드 중...";
-      var fd=new FormData();
-      fd.append("file",blob,"clipboard.png");
-      fetch("/api/rep-img/upload",{{method:"POST",body:fd}})
-        .then(function(r){{return r.json();}})
-        .then(function(data){{
-          if(data.ok){{
-            zone.style.borderColor="#22c55e";
-            zone.setAttribute("data-rep-path",data.path);
-            zone.setAttribute("data-rep-url",data.url);
-            var dlg=zone.closest(".q-dialog");
-            if(dlg){{
-              var prevImg=dlg.querySelector("img");
-              if(prevImg){{prevImg.src=data.url+"?t="+Date.now();}}
-            }}
-            zone.innerHTML='<img src="'+data.url+'?t='+Date.now()+'" style="max-height:160px;border-radius:4px;" />';
-            setTimeout(resetZone,3000);
-          }}else{{
-            zone.style.borderColor="#ef4444";
-            zone.innerHTML="❌ 실패: "+(data.error||"");
-            setTimeout(resetZone,3000);
-          }}
-        }}).catch(function(){{zone.style.borderColor="#ef4444";zone.innerHTML="❌ 오류";setTimeout(resetZone,3000);}});
-    }}
-    function handlePaste(e){{
-      var cd=e.clipboardData||(e.originalEvent&&e.originalEvent.clipboardData);
-      if(!cd)return;
-      var items=cd.items||[];
-      for(var i=0;i<items.length;i++){{
-        if(items[i].kind==="file"&&items[i].type.indexOf("image")!==-1){{
-          var b=items[i].getAsFile();
-          if(b){{e.preventDefault();e.stopPropagation();uploadBlob(b);return;}}
-        }}
-      }}
-    }}
-    zone.addEventListener("paste",handlePaste);
-    zone.addEventListener("dragover",function(e){{e.preventDefault();zone.style.borderColor="#38bdf8";}});
-    zone.addEventListener("dragleave",function(){{zone.style.borderColor="#64748b";}});
-    zone.addEventListener("drop",function(e){{
-      e.preventDefault();
-      var dt=e.dataTransfer;if(!dt)return;
-      var files=dt.files;
-      if(files&&files.length){{uploadBlob(files[0]);return;}}
-      var its=dt.items||[];
-      for(var k=0;k<its.length;k++){{
-        if(its[k].kind==="file"&&its[k].type.indexOf("image")!==-1){{
-          var b2=its[k].getAsFile();if(b2){{uploadBlob(b2);return;}}
-        }}
-      }}
-    }});
-    var _docH=function(ev){{
-      var z=document.getElementById(_rzid);
-      if(!z||!z.isConnected){{document.removeEventListener("paste",_docH,true);return;}}
-      var cd2=ev.clipboardData;if(!cd2)return;
-      var its=cd2.items||[];
-      for(var j=0;j<its.length;j++){{
-        if(its[j].kind==="file"&&its[j].type.indexOf("image")!==-1){{handlePaste(ev);return;}}
-      }}
-    }};
-    document.addEventListener("paste",_docH,true);
+  var hid="{_hid}";
+  var h=document.getElementById(hid);
+  if(!h){{h=document.createElement("div");h.id=hid;h.style.display="none";document.body.appendChild(h);}}
+  h.setAttribute("data-ready","0");h.setAttribute("data-path","");
+
+  // 플로팅 인디케이터
+  var ind=document.createElement("div");
+  ind.id="rp-ind-{e_ref.uid}";
+  ind.style.cssText="position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10000;"
+    +"background:#1e40af;color:#fff;padding:10px 28px;border-radius:8px;font-size:14px;"
+    +"box-shadow:0 4px 16px rgba(0,0,0,.45);pointer-events:none;white-space:nowrap;";
+  ind.textContent="📋 Ctrl+V로 이미지 붙여넣기";
+  document.body.appendChild(ind);
+
+  function cleanup(){{
+    document.removeEventListener("paste",ph,true);
+    var el=document.getElementById("rp-ind-{e_ref.uid}");if(el)el.remove();
   }}
-  initRepZone();
+  h._rph_cleanup=cleanup;
+
+  function ph(ev){{
+    var cd=ev.clipboardData;if(!cd)return;
+    var items=cd.items||[];
+    for(var i=0;i<items.length;i++){{
+      if(items[i].kind==="file"&&items[i].type.indexOf("image")!==-1){{
+        var blob=items[i].getAsFile();if(!blob)continue;
+        ev.preventDefault();ev.stopPropagation();
+        cleanup();
+        // 업로드 중 표시
+        var uploading=document.createElement("div");
+        uploading.style.cssText="position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10000;"
+          +"background:#1d4ed8;color:#fff;padding:10px 28px;border-radius:8px;font-size:14px;white-space:nowrap;";
+        uploading.textContent="⏳ 업로드 중...";
+        document.body.appendChild(uploading);
+        var fd=new FormData();fd.append("file",blob,"clipboard.png");
+        fetch("/api/rep-img/upload",{{method:"POST",body:fd}})
+          .then(function(r){{return r.json();}})
+          .then(function(data){{
+            uploading.remove();
+            if(data.ok){{h.setAttribute("data-path",data.path);h.setAttribute("data-ready","1");}}
+            else{{
+              var err=document.createElement("div");
+              err.style.cssText="position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10000;"
+                +"background:#dc2626;color:#fff;padding:10px 28px;border-radius:8px;font-size:14px;white-space:nowrap;";
+              err.textContent="❌ 업로드 실패: "+(data.error||"");
+              document.body.appendChild(err);setTimeout(function(){{err.remove();}},3000);
+            }}
+          }}).catch(function(){{
+            uploading.remove();
+            var err2=document.createElement("div");
+            err2.style.cssText="position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10000;"
+              +"background:#dc2626;color:#fff;padding:10px 28px;border-radius:8px;font-size:14px;white-space:nowrap;";
+            err2.textContent="❌ 네트워크 오류";
+            document.body.appendChild(err2);setTimeout(function(){{err2.remove();}},3000);
+          }});
+        return;
+      }}
+    }}
+  }}
+  document.addEventListener("paste",ph,true);
 }})();
 """)
-                                    _rdlg.open()
                                 return _h
 
                             _has_custom_img = bool(getattr(entry, "custom_image_path", "") and Path(getattr(entry, "custom_image_path", "")).exists())
