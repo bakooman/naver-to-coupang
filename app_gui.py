@@ -7813,7 +7813,11 @@ def page() -> None:
                                 extra_detail_images = list(_ed.get("extra_detail_images") or []),
                                 extra_detail_text   = _ed.get("extra_detail_text", ""),
                                 bundle_unit         = int(_ed.get("bundle_unit") or 0),
-                                custom_image_path   = "",  # 재수집 시 초기화 — 이전 세션 임시 이미지 파일 무시
+                                custom_image_path   = (
+                                    _ed.get("custom_image_path", "")
+                                    if (_ed.get("custom_image_path") and Path(_ed.get("custom_image_path", "")).exists())
+                                    else ""
+                                ),  # 파일이 실제로 존재할 때만 복원 (삭제됐거나 없으면 네이버 원본 사용)
                             )
                             queue.append(_new_e)
                             _added += 1
@@ -8642,12 +8646,24 @@ def page() -> None:
                             _has_custom_img = bool(getattr(entry, "custom_image_path", "") and Path(getattr(entry, "custom_image_path", "")).exists())
                             _rep_img_color = "blue" if _has_custom_img else "grey-6"
                             _rep_img_lbl   = "🖼 이미지변경됨" if _has_custom_img else "🖼 대표이미지"
-                            ui.button(
-                                _rep_img_lbl,
-                                on_click=_make_rep_img_handler(),
-                            ).props(f"outline size=md color={_rep_img_color}").style(
-                                "font-size:13px; font-weight:600; padding:4px 12px"
-                            ).tooltip("대표이미지 직접 지정 (네이버 원본 대체)")
+                            with ui.row().classes("items-center gap-0 flex-nowrap"):
+                                ui.button(
+                                    _rep_img_lbl,
+                                    on_click=_make_rep_img_handler(),
+                                ).props(f"outline size=md color={_rep_img_color}").style(
+                                    "font-size:13px; font-weight:600; padding:4px 12px"
+                                ).tooltip("대표이미지 직접 지정 (네이버 원본 대체)")
+                                if _has_custom_img:
+                                    def _make_clear_img_handler(e_ref=entry):
+                                        def _clear():
+                                            e_ref.custom_image_path = ""
+                                            ui.notify("대표이미지 초기화 — 재수집 시 네이버 원본 사용", type="info", timeout=2000)
+                                            _render_queue()
+                                        return _clear
+                                    ui.button(
+                                        "✕",
+                                        on_click=_make_clear_img_handler(),
+                                    ).props("flat dense size=xs color=red").tooltip("대표이미지 초기화 (네이버 원본으로 재수집)")
 
                             # ── 관부가세 추가 버튼 ──────────────────────────
                             def _make_customs_handler(e_ref=entry):
