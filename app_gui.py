@@ -2568,15 +2568,6 @@ async def _process_entry(
             if detail_img_url:
                 log_(f"[{entry.uid[:6]}] 상세이미지 fallback → 원본 네이버 URL 사용")
 
-        # 해외배송(✈️) 선택 시 우마이마켓 안내 이미지를 상세페이지 최상단에 삽입
-        _UMAI_NOTICE_IMG = (
-            "https://pub-52f3ccc0b1874a4dbca6ac2b8b860d49.r2.dev/"
-            "%ED%95%B4%EC%99%B8%EB%B0%B0%EC%86%A1.png"
-        )
-        overseas_prefix = (
-            f"<img src='{_UMAI_NOTICE_IMG}'>"
-            if lead_time == 10 else ""
-        )
 
         # ── 4. 가격 산출 (단일 마진율) ──────────────────────────────
         # bundle_unit 수동 설정 시 product.delivery에 주입 (크롤러가 못 잡은 경우 대체)
@@ -2874,17 +2865,6 @@ async def _process_entry(
                 _target_w = 780
                 _pil_imgs = []
 
-                # 해외배송 안내 이미지: 로컬 파일 직접 로드 (CDN 캐시 우회)
-                if lead_time == 10:
-                    _overseas_img_path = Path(__file__).parent / "data" / "해외배송.png"
-                    try:
-                        _ov_img = _PILImage.open(_overseas_img_path).convert("RGB")
-                        _ratio = _target_w / _ov_img.width
-                        _pil_imgs.append(_ov_img.resize((_target_w, int(_ov_img.height * _ratio)), _PILImage.LANCZOS))
-                        log_(f"[{entry.uid[:6]}] 해외배송 안내 이미지 로컬 로드 완료")
-                    except Exception as _oe:
-                        log_(f"[{entry.uid[:6]}] ⚠ 해외배송 안내 이미지 로드 실패: {_oe}")
-
                 for _u in _detail_urls_to_merge:
                     try:
                         _img = await loop.run_in_executor(None, lambda u=_u: _dl_img(u))
@@ -2925,8 +2905,7 @@ async def _process_entry(
             detail_html = ""
 
         log_(f"[{entry.uid[:6]}] 상세 설명 완료 (이미지={'있음' if detail_html else '없음'}"
-             f"{', 합성' if '_combined' in detail_html else ''}"
-             f"{', 해외배송 포함' if lead_time == 10 else ''})")
+             f"{', 합성' if '_combined' in detail_html else ''})")
 
         # ── 옵션 자동 추출 (세트 상품 vs 일반 상품 분기) ──────────────
         extra_options: list[tuple[str, str]] = []
@@ -7474,10 +7453,6 @@ def page() -> None:
                             ship_conv_lbl = ui.label("배송방식 일괄전환").classes("font-bold text-sky-700")
                             _ship_hint_lbl = ui.label("").classes("text-xs text-slate-500")
                             def _toggle_shipping():
-                                _OVERSEAS_TAG = (
-                                    "<img src='https://pub-52f3ccc0b1874a4dbca6ac2b8b860d49.r2.dev/"
-                                    "%EC%9A%B0%EB%A7%88%EC%9D%B4%EB%A7%88%EC%BC%93.png'>"
-                                )
                                 done_ents = [e for e in queue if e.status in ("done", "error") and e.result_item]
                                 if not done_ents:
                                     ui.notify("전환할 완료 항목이 없습니다.", type="warning")
@@ -7489,11 +7464,6 @@ def page() -> None:
                                     e.lead_time = new_lt
                                     if e.result_item:
                                         e.result_item.lead_time = new_lt
-                                        desc = e.result_item.detail_description or ""
-                                        if to_overseas and _OVERSEAS_TAG not in desc:
-                                            e.result_item.detail_description = _OVERSEAS_TAG + desc
-                                        elif not to_overseas:
-                                            e.result_item.detail_description = desc.replace(_OVERSEAS_TAG, "")
                                 mode_str = "✈️ 해외배송 10일" if to_overseas else "🚚 국내배송 3일"
                                 _ship_hint_lbl.set_text(f"→ {len(done_ents)}개 {mode_str} 전환됨")
                                 ui.notify(f"{len(done_ents)}개 항목 {mode_str}로 전환 완료", type="positive", timeout=3000)
