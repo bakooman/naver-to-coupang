@@ -552,11 +552,12 @@ def check_one(pw: PriceWatch) -> PriceWatch:
     return pw
 
 
-def check_all(log_cb=None, max_workers: int = 5) -> dict:
+def check_all(log_cb=None, batch_size: int = 500, workers_per_batch: int = 10) -> dict:
     """
-    전체 감시 목록 일괄 체크 (병렬 처리).
+    전체 감시 목록 일괄 체크 — 배치 병렬 처리.
 
-    - max_workers개 동시 요청으로 속도 향상
+    - batch_size 개씩 묶어 여러 배치를 동시에 실행
+    - 배치당 workers_per_batch 개 스레드 (기본 500개 × 10스레드 = 배치당 병렬)
     - 항목마다 즉시 저장 → 중단돼도 진행분 보존
     - log_cb(msg, done, total) 형태로 진행 상황 전달
 
@@ -573,7 +574,15 @@ def check_all(log_cb=None, max_workers: int = 5) -> dict:
         return {"risen": 0, "fallen": 0, "soldout": 0, "ok": 0, "errors": 0,
                 "done": 0, "total": 0}
 
-    # 체크 시작 상태 저장 (앱 종료 시 중단 감지용)
+    # 배치 분할 (500개씩)
+    batches = [watches[i:i + batch_size] for i in range(0, total, batch_size)]
+    n_batches = len(batches)
+
+    print(
+        f"[PriceChecker] 총 {total}개 → {n_batches}개 배치 병렬 시작 "
+        f"(배치당 {batch_size}개 / {workers_per_batch} 스레드)"
+    )
+
     _save(watches, check_state={
         "in_progress": True,
         "done": 0,
@@ -588,60 +597,69 @@ def check_all(log_cb=None, max_workers: int = 5) -> dict:
 
     def _do_one(pw):
         try:
-            updated = check_one(pw)
-            return updated, None
+            return check_one(pw), None
         except Exception as e:
             return pw, e
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(_do_one, pw): pw for pw in watches}
-        for fut in as_completed(futures):
-            updated_pw, err = fut.result()
-            with lock:
-                idx = uid_map[updated_pw.uid]
-                # 레이스 컨디션 방지: 디스크의 acked 값을 우선 적용
-                # (체크 도중 사용자가 확인완료 누르면 그 값을 보존)
-                try:
-                    current_on_disk = _load()
-                    disk_map = {w.uid: w for w in current_on_disk}
-                    if updated_pw.uid in disk_map:
-                        disk_acked = disk_map[updated_pw.uid].acked
-                        if disk_acked and not updated_pw.acked:
-                            updated_pw.acked = True
-                            if updated_pw.status in ("soldout", "risen", "fallen"):
-                                updated_pw.status = "ok"
-                                updated_pw.change = 0
-                except Exception:
-                    pass
-                watches[idx] = updated_pw
-                if err:
-                    result["errors"] += 1
-                    print(f"[PriceChecker] 오류 ({updated_pw.uid}): {err}")
-                else:
-                    result[updated_pw.status] = result.get(updated_pw.status, 0) + 1
-                result["done"] += 1
-                done = result["done"]
-                _save(watches, check_state={
-                    "in_progress": True,
-                    "done": done,
-                    "total": total,
-                    "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                })
+    def _run_batch(batch: list, batch_idx: int) -> None:
+        """단일 배치를 자체 ThreadPoolExecutor로 처리."""
+        with ThreadPoolExecutor(max_workers=workers_per_batch) as ex:
+            futures = {ex.submit(_do_one, pw): pw for pw in batch}
+            for fut in as_completed(futures):
+                updated_pw, err = fut.result()
+                with lock:
+                    idx = uid_map[updated_pw.uid]
+                    # 레이스 컨디션 방지: 디스크의 acked 값 우선 적용
+                    try:
+                        current_on_disk = _load()
+                        disk_map = {w.uid: w for w in current_on_disk}
+                        if updated_pw.uid in disk_map:
+                            disk_acked = disk_map[updated_pw.uid].acked
+                            if disk_acked and not updated_pw.acked:
+                                updated_pw.acked = True
+                                if updated_pw.status in ("soldout", "risen", "fallen"):
+                                    updated_pw.status = "ok"
+                                    updated_pw.change = 0
+                    except Exception:
+                        pass
+                    watches[idx] = updated_pw
+                    if err:
+                        result["errors"] += 1
+                        print(f"[PriceChecker] 오류 ({updated_pw.uid}): {err}")
+                    else:
+                        result[updated_pw.status] = result.get(updated_pw.status, 0) + 1
+                    result["done"] += 1
+                    done = result["done"]
+                    _save(watches, check_state={
+                        "in_progress": True,
+                        "done": done,
+                        "total": total,
+                        "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                    })
 
-            name_short = (updated_pw.name or updated_pw.url)[:30]
-            msg = (
-                f"[가격체크 {done}/{total}] {name_short} "
-                f"→ {updated_pw.status}"
-                + (f" ({updated_pw.change:+,}원)" if updated_pw.change else "")
-            )
-            print(msg)
-            if log_cb:
-                try:
-                    log_cb(msg, done, total)
-                except TypeError:
-                    log_cb(msg)   # 구형 호출부 호환
+                name_short = (updated_pw.name or updated_pw.url)[:30]
+                msg = (
+                    f"[배치{batch_idx+1}/{n_batches} | 전체{done}/{total}] {name_short} "
+                    f"→ {updated_pw.status}"
+                    + (f" ({updated_pw.change:+,}원)" if updated_pw.change else "")
+                )
+                print(msg)
+                if log_cb:
+                    try:
+                        log_cb(msg, done, total)
+                    except TypeError:
+                        log_cb(msg)
 
-    # 체크 완료 상태 저장
+    # 모든 배치를 스레드로 동시 실행
+    batch_threads = [
+        threading.Thread(target=_run_batch, args=(batch, i), daemon=True)
+        for i, batch in enumerate(batches)
+    ]
+    for t in batch_threads:
+        t.start()
+    for t in batch_threads:
+        t.join()
+
     _save(watches, check_state={
         "in_progress": False,
         "done": total,
