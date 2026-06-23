@@ -2117,6 +2117,37 @@ async def _process_entry(
                 _wing_flat_g = _get_wing_cat_flat()
                 _nav_l1 = _naver_to_wing_l1(product.naver_category)
 
+                if not _nav_l1:
+                    # L1 불명 → Gemini로 대분류 먼저 추론 (2단계)
+                    _WING_L1_LIST = [
+                        "식품", "뷰티", "생활용품", "자동차용품", "반려/애완용품",
+                        "가전/디지털", "스포츠/레져", "완구/취미", "출산/유아동",
+                        "주방용품", "가구/홈데코", "패션의류잡화", "문구/오피스",
+                        "도서", "음반/DVD",
+                    ]
+                    try:
+                        _l1_prompt = (
+                            f"상품명: {product.name}\n"
+                            f"네이버 카테고리: {product.naver_category or '없음'}\n\n"
+                            "다음 중 이 상품이 속하는 대분류 하나만 고르세요. "
+                            "반드시 목록 값 그대로 답하세요. 설명 없이 대분류명만.\n\n"
+                            + "\n".join(f"- {_l}" for _l in _WING_L1_LIST)
+                        )
+                        _l1_resp = await loop.run_in_executor(
+                            None, lambda: _gc_model.generate_content(_l1_prompt)
+                        )
+                        _l1_txt = (_l1_resp.text or "").strip().strip('"').strip("'").strip()
+                        for _l1c in _WING_L1_LIST:
+                            if _l1_txt == _l1c or _l1c in _l1_txt:
+                                _nav_l1 = _l1c
+                                break
+                        if _nav_l1:
+                            log_(f"[{entry.uid[:6]}] [1단계] Gemini L1 추론 → '{_nav_l1}'")
+                        else:
+                            log_(f"[{entry.uid[:6]}] ⚠ Gemini L1 추론 실패: '{_l1_txt}'")
+                    except Exception as _l1e:
+                        log_(f"[{entry.uid[:6]}] ⚠ Gemini L1 추론 오류: {_l1e}")
+
                 if _nav_l1:
                     _gc_cats = [
                         c for c in _wing_flat_g
@@ -2125,7 +2156,7 @@ async def _process_entry(
                     if not _gc_cats:
                         _gc_cats = _wing_flat_g
                 else:
-                    _gc_cats = []  # L1 불명 → Gemini 건너뜀, 키워드 사전으로
+                    _gc_cats = []
 
                 if _gc_cats:
                     _NL = "\n"
@@ -2177,7 +2208,7 @@ async def _process_entry(
                             log_(f"[{entry.uid[:6]}] ⚠ Gemini '{_gc_txt}' 목록 미매칭 → keyword fallback")
                             _gc_res = detector.search_by_keyword(_gc_txt)
                             if not _gc_res:
-                                _gc_res = detector._fallback_wing_search(_gc_txt)
+                                _gc_res = detector._fallback_wing_search(_gc_txt, l1_filter=_nav_l1)
                             if _gc_res:
                                 _gc_id, _gc_gcat, _gc_name = _gc_res
                                 if not entry.category_is_manual:
@@ -2213,7 +2244,9 @@ async def _process_entry(
                 for _nc_kw in reversed(_nc_parts):
                     if len(_nc_kw) <= 1:
                         continue
-                    _nc_res = detector._fallback_wing_search(_nc_kw)
+                    _nc_res = detector._fallback_wing_search(
+                        _nc_kw, l1_filter=_naver_to_wing_l1(product.naver_category)
+                    )
                     if _nc_res:
                         _nc_id, _nc_gcat, _nc_matched = _nc_res
                         entry.category_id      = _nc_id
