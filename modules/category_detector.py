@@ -85,6 +85,10 @@ _SKIP_NAMES = {
     # 예) "PS5 한국어 중국어 지원" → 어학>중국어 오매핑
     "중국어", "영어", "일어", "일본어", "한국어", "프랑스어", "독일어",
     "스페인어", "이탈리아어", "러시아어", "아랍어", "포르투갈어",
+    # 국가/지역 수식어 → 도서/여행 카테고리 오매칭 방지
+    # 예) "일본 고바야시 민티아" → 도서>여행>해외여행>일본 오매핑
+    "일본", "미국", "중국", "영국", "독일", "프랑스", "이탈리아",
+    "호주", "캐나다", "태국", "베트남", "스페인",
 }
 
 # 캐시된 flat 카테고리 목록
@@ -254,7 +258,7 @@ class CategoryDetector:
     # ── Private ────────────────────────────────────────────────────
 
     def _fallback_wing_search(
-        self, product_name: str
+        self, product_name: str, l1_filter: str | None = None
     ) -> tuple[str, str, str] | None:
         """
         wing_categories.json 전체를 검색해 상품명에 카테고리 세분류 이름이
@@ -264,6 +268,7 @@ class CategoryDetector:
           - 카테고리명(name)이 상품명에 포함되어야 함
           - 너무 짧거나(2자 이하) 일반적인 이름은 제외
           - 여러 매칭 시 이름이 긴(더 구체적) 것 우선
+          - l1_filter 지정 시 해당 L1 대분류 내에서만 검색 (오매핑 방지)
         Returns:
           (category_id, gosisi_cat, matched_name) or None
         """
@@ -282,6 +287,12 @@ class CategoryDetector:
                 continue
             if name in _SKIP_NAMES or len(name) < 2:
                 continue
+            # L1 필터: 지정된 대분류 내에서만 검색
+            if l1_filter:
+                _path_parts = entry.get("path", "").split(">")
+                _path_l1 = _path_parts[1].strip() if len(_path_parts) > 1 else ""
+                if _path_l1 != l1_filter:
+                    continue
             # 카테고리명 정규화 후 상품명에 포함 여부 확인
             name_norm = name.lower().replace(" ", "").replace("-", "")
             if name_norm not in pname_norm:
