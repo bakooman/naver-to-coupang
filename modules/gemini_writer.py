@@ -106,7 +106,11 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         # ── 렌더링할 블록 수집 ────────────────────────────────
         # (tag, text) 리스트
         blocks: list[tuple[str, str]] = []
+        TARGET_TAGS = {"h3", "p", "li"}
         for el in soup.find_all(["h3", "p", "li"]):
+            # 부모 중에 같은 타겟 태그가 있으면 중첩 요소 → 건너뜀
+            if any(p.name in TARGET_TAGS for p in el.parents):
+                continue
             text = el.get_text(" ", strip=True)
             if text:
                 blocks.append((el.name, text))

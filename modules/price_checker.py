@@ -200,21 +200,27 @@ def _fetch_product_info(url: str, timeout: int = 12) -> dict:
     """
     URL → {"name": str, "price": int, "soldout": bool, "error": str}
 
-    1순위) BrightData Web Unlocker (봇 차단 우회)
-    2순위) 직접 requests (BrightData 키 없을 때 fallback)
+    1순위) 직접 requests
+    2순위) BrightData Web Unlocker (직접 요청 실패 시만)
     __PRELOADED_STATE__ 우선 파싱 → meta tag fallback.
     """
-    # ── 1순위: BrightData Web Unlocker ───────────────────────────
-    html = _brightdata_fetch(url, timeout=90)
-
-    # ── 2순위: 직접 요청 (BrightData 키 없거나 실패 시) ──────────
-    if html is None:
-        try:
-            resp = requests.get(url, headers=_HEADERS, timeout=timeout, verify=False)
-            resp.raise_for_status()
+    # ── 1순위: 직접 요청 ─────────────────────────────────────────
+    html = None
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=timeout, verify=False)
+        resp.raise_for_status()
+        # 봇 차단 감지: __PRELOADED_STATE__ 없으면 실패로 간주
+        if resp.status_code == 200 and "__PRELOADED_STATE__" in resp.text:
             html = resp.text
-        except Exception as e:
-            return {"name": "", "price": 0, "soldout": False, "error": str(e)}
+    except Exception:
+        pass
+
+    # ── 2순위: BrightData Web Unlocker (직접 요청 실패 시만) ─────
+    if html is None:
+        html = _brightdata_fetch(url, timeout=90)
+
+    if html is None:
+        return {"name": "", "price": 0, "soldout": False, "error": "fetch failed"}
 
     # ── __PRELOADED_STATE__ 파싱 ─────────────────────────────────
     raw: Optional[dict] = None
@@ -519,12 +525,12 @@ def check_one(pw: PriceWatch) -> PriceWatch:
             pw.base_price = new_price  # 재입고 시점 가격을 새 기준가로
             pw.change = 0
         else:
-            # 품절 이력 없음 → acked 해제 후 일반 가격 비교
+            # 품절 이력 없음 → acked 해제, base_price를 현재가로 교정 후 정상 처리
             pw.acked = False
-            if pw.base_price > 0 and new_price > 0:
-                pw.change = new_price - pw.base_price
-                if pw.change > 0:
-                    pw.status = "risen"
+            if new_price > 0:
+                pw.base_price = new_price  # 확인완료 시점 가격 기준으로 리셋 → 즉시 재알림 방지
+            pw.status = "ok"
+            pw.change = 0
                 elif pw.change < 0:
                     pw.status = "fallen"
                 else:
@@ -753,9 +759,9 @@ def _send_price_alert(result: dict, watches: list) -> None:
     except Exception:
         return
 
-    risen   = [w for w in watches if w.status == "risen"]
-    fallen  = [w for w in watches if w.status == "fallen"]
-    soldout = [w for w in watches if w.status == "soldout"]
+    risen   = [w for w in watches if w.status == "risen"   and not getattr(w, "acked", False)]
+    fallen  = [w for w in watches if w.status == "fallen"  and not getattr(w, "acked", False)]
+    soldout = [w for w in watches if w.status == "soldout" and not getattr(w, "acked", False)]
 
     if not risen and not fallen and not soldout:
         return  # 이상 없음 → 발송 안 함
