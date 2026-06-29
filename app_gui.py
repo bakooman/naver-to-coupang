@@ -4816,8 +4816,8 @@ def page_monitor() -> None:
                         added = 0
                         _sel_store = _mon_store_sel.value or "샵케이"
                         for u in urls:
-                            if "smartstore.naver.com" not in u:
-                                ui.notify(f"네이버 스마트스토어 URL이 아닙니다: {u[:50]}", type="warning")
+                            if "smartstore.naver.com" not in u and "brand.naver.com" not in u:
+                                ui.notify(f"네이버 SmartStore/Brand URL이 아닙니다: {u[:50]}", type="warning")
                                 continue
                             _pc.add_watch(u, store=_sel_store)
                             added += 1
@@ -7012,7 +7012,7 @@ def page() -> None:
 
                                     _fsize = len(content.encode("utf-8"))
                                     urls = _parse_urls_from_text(content)
-                                    naver_urls = [u for u in urls if "smartstore.naver.com" in u]
+                                    naver_urls = [u for u in urls if "smartstore.naver.com" in u or "brand.naver.com" in u]
                                     other_urls  = len(urls) - len(naver_urls)
 
                                     # ── 이전 배치 복원 확인 ───────────────────────────────
@@ -9727,8 +9727,8 @@ def page() -> None:
         if not (url.startswith("http://") or url.startswith("https://")):
             ui.notify(f"올바른 URL이 아닙니다 (https://... 형식으로 입력)", type="warning")
             return
-        if "smartstore.naver.com" not in url:
-            ui.notify("네이버 SmartStore URL만 지원합니다 (smartstore.naver.com)", type="warning")
+        if "smartstore.naver.com" not in url and "brand.naver.com" not in url:
+            ui.notify("네이버 SmartStore 또는 Brand URL만 지원합니다", type="warning")
             return
         if _is_duplicate_url(url, queue):
             ui.notify("이미 추가된 URL입니다 (같은 상품 ID).", type="warning")

@@ -92,13 +92,27 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
             "C:/Windows/Fonts/malgun.ttf",
             "data/fonts/NotoSansKR-Light.otf",
         ]
+        _FONT_BOLD_PATHS = [
+            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothicBold.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothicExtraBold.ttf",
+            "C:/Windows/Fonts/malgunbd.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+        ]
 
-        def _font(size: int) -> _Font.ImageFont:
-            for p in _FONT_PATHS:
+        def _font(size: int, bold: bool = False) -> _Font.ImageFont:
+            paths = _FONT_BOLD_PATHS if bold else _FONT_PATHS
+            for p in paths:
                 try:
                     return _Font.truetype(p, size)
                 except Exception:
                     pass
+            if bold:
+                for p in _FONT_PATHS:
+                    try:
+                        return _Font.truetype(p, size)
+                    except Exception:
+                        pass
             return _Font.load_default()
 
         soup = BeautifulSoup(html_body, "html.parser")
@@ -121,9 +135,9 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         PAD_X     = 32
         PAD_Y     = 28
         LINE_H_P  = 26   # p/li 행 간격
-        LINE_H_H3 = 34   # h3 행 간격
+        LINE_H_H3 = 36   # h3 행 간격
         FONT_P    = _font(16)
-        FONT_H3   = _font(20)
+        FONT_H3   = _font(21, bold=True)
         CHAR_W    = width - PAD_X * 2  # 텍스트 가용 픽셀 폭
 
         # 한글 문자 실제 폭을 PIL로 측정해서 줄바꿈 계산
@@ -383,10 +397,26 @@ def _generate_text(
             ══════════════════════════════════════════
             [출력 형식]
             ══════════════════════════════════════════
-            - h3 태그(제목)와 p 태그(단락)로 구성
-            - 스펙·성분은 ul/li 태그로 정리
+            - h3 태그(섹션 헤딩) + p 태그(단락) + ul/li(목록)으로 구성
             - 마크다운 금지, HTML 태그만 사용
-            - 전체 600자 내외
+            - 전체 1,000자 이상 (풍부하고 설득력 있게)
+
+            [이모티콘 지침]
+            - 각 h3 헤딩 맨 앞에 반드시 관련 이모티콘 1개 포함
+              예) ☕ 제품 소개 / 🎯 이런 분들께 추천합니다 / 📝 테이스팅 노트 / 🌱 상품 필수 정보
+            - li 항목 끝에 맥락에 맞는 이모티콘 1개 배치 (과하지 않게, 내용당 1개)
+            - 첫 소개 단락 끝에도 분위기에 맞는 이모티콘 1~2개 포함
+
+            [글씨 굵기 지침]
+            - 단락(p) 안에서 핵심 특징·성분·용량·브랜드명 등 강조할 단어는 <strong> 태그로 감싸기
+              예) <p>엄선된 <strong>100% 아라비카</strong> 원두를 정교하게 블렌딩하여...</p>
+
+            [필수 섹션 구조]
+            1. 제품 핵심 소개 (h3 + p 1~2단락 — 제품의 정체성과 핵심 매력)
+            2. 이런 분들께 추천합니다 (h3 + ul/li 3~5개 — 추천 대상, 각 항목 끝 이모티콘)
+            3. 카테고리에 맞는 특징 섹션
+               예) 커피 → 테이스팅 노트 | 식품 → 원재료 특징 | 뷰티 → 주요 성분·사용감
+            4. 상품 필수 정보 (h3 + ul/li — 용량·원산지·포장 등 팩트 정보)
         """).strip()
 
         parts = [types.Part.from_text(text=prompt)]

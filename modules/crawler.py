@@ -333,8 +333,25 @@ class NaverStoreCrawler:
         # ── IP 노출 진단 (동기 IO → executor) ─────────────────────
         await loop.run_in_executor(None, self._check_ip_leak)
 
+        # ── brand.naver.com → smartstore.naver.com 자동 변환 시도 ──
+        # brand.naver.com은 SmartStore 채널이므로 동일 store/pid로 접근 가능.
+        # brand WAF를 우회하면서 기존 smartstore 크롤러를 재사용.
+        crawl_url = url
+        if "brand.naver.com" in url:
+            ss_equiv = f"https://smartstore.naver.com/{store}/products/{pid}"
+            print(f"[Crawler] brand URL → smartstore 동등 URL 우선 시도: {ss_equiv}")
+            raw_ss = await loop.run_in_executor(None, self._try_requests, ss_equiv)
+            if raw_ss:
+                print(f"[Crawler] brand→smartstore 변환 성공 (WAF 우회)")
+                product = self._build(url, store, pid, raw_ss)
+                product.local_image_path = await self._download_image(
+                    product.image_url, product.product_id
+                )
+                return product
+            print(f"[Crawler] smartstore 동등 URL 실패 → brand URL 직접 시도")
+
         # Stage 1: curl_cffi / requests (동기 → executor)
-        raw = await loop.run_in_executor(None, self._try_requests, url)
+        raw = await loop.run_in_executor(None, self._try_requests, crawl_url)
 
         if raw is None:
             if self.api_key:
@@ -345,19 +362,19 @@ class NaverStoreCrawler:
                 # WU API도 실패(빈 응답/429 등)하면 nodriver → playwright 폴백
                 if raw is None:
                     print("[Crawler] WU API 실패 → nodriver 폴백 시도")
-                    raw = await self._try_nodriver(url)
+                    raw = await self._try_nodriver(crawl_url)
                     if raw is None:
                         print("[Crawler] nodriver 실패 → Playwright 폴백 시도")
-                        raw = await self._try_playwright(url)
+                        raw = await self._try_playwright(crawl_url)
             else:
                 # Stage 2: nodriver (WebDriver 미사용 -탐지 우회율 최고)
                 print("[Crawler] stage 1 실패 -> nodriver")
-                raw = await self._try_nodriver(url)
+                raw = await self._try_nodriver(crawl_url)
 
                 # Stage 3: Playwright (nodriver 불가 시 fallback)
                 if raw is None:
                     print("[Crawler] nodriver 실패 -> Playwright")
-                    raw = await self._try_playwright(url)
+                    raw = await self._try_playwright(crawl_url)
 
                 # Stage 4: Naver REST API (동기 → executor)
                 if raw is None:
@@ -389,13 +406,17 @@ class NaverStoreCrawler:
     @staticmethod
     def _parse_url(url: str) -> tuple[str, str]:
         m = re.search(r"smartstore\.naver\.com/([^/?#]+)/products/(\d+)", url)
-        if not m:
-            raise ValueError(
-                f"SmartStore 상품 URL이 아닙니다.\n"
-                f"올바른 형식: https://smartstore.naver.com/스토어명/products/상품번호\n"
-                f"입력값: {url}"
-            )
-        return m.group(1), m.group(2)
+        if m:
+            return m.group(1), m.group(2)
+        m = re.search(r"brand\.naver\.com/([^/?#]+)/products/(\d+)", url)
+        if m:
+            return m.group(1), m.group(2)
+        raise ValueError(
+            f"SmartStore/Brand 상품 URL이 아닙니다.\n"
+            f"올바른 형식: https://smartstore.naver.com/스토어명/products/상품번호\n"
+            f"         또는 https://brand.naver.com/브랜드명/products/상품번호\n"
+            f"입력값: {url}"
+        )
 
     async def extract_smartstore_urls(self, search_url: str) -> list[str]:
         """
@@ -519,6 +540,9 @@ class NaverStoreCrawler:
 
     def _try_requests(self, url: str) -> Optional[dict]:
         clean = url.split("?")[0]   # 트래킹 파라미터 제거
+        _is_brand = "brand.naver.com" in url
+        _referer = "https://brand.naver.com/" if _is_brand else "https://smartstore.naver.com/"
+        _cffi_extra = {**self._CFFI_EXTRA, "Referer": _referer}
 
         # ── 1-A: Bright Data Web Unlocker API (WAF 자동 우회) ────────
         if self.api_key:
@@ -543,7 +567,7 @@ class NaverStoreCrawler:
             resp = cf.get(
                 clean,
                 impersonate="chrome124",
-                headers=self._CFFI_EXTRA,
+                headers=_cffi_extra,
                 proxies=_cf_proxies,
                 timeout=20,
                 verify=False,
@@ -567,7 +591,7 @@ class NaverStoreCrawler:
 
         # ── 1-C: requests 직접 연결 (최후 폴백) ─────────────────────
         try:
-            resp = self.session.get(clean, timeout=15)
+            resp = self.session.get(clean, timeout=15, headers={"Referer": _referer})
             sc = resp.status_code
             print(f"[Crawler] stage 1 requests: status={sc}  len={len(resp.text)}")
             resp.raise_for_status()
@@ -827,11 +851,16 @@ class NaverStoreCrawler:
             except Exception as _pre_err:
                 print(f"[Crawler] naver.com pre-visit failed: {_pre_err}")
 
-            # ── Step 2: SmartStore 홈 방문 (자연스러운 경로) ──────────────
-            _store = url.split("smartstore.naver.com/")[-1].split("/")[0]
+            # ── Step 2: 스토어/브랜드 홈 방문 (자연스러운 경로) ──────────
+            if "brand.naver.com" in url:
+                _store = url.split("brand.naver.com/")[-1].split("/")[0]
+                _store_home = f"https://brand.naver.com/{_store}"
+            else:
+                _store = url.split("smartstore.naver.com/")[-1].split("/")[0]
+                _store_home = f"https://smartstore.naver.com/{_store}"
             try:
                 await page.goto(
-                    f"https://smartstore.naver.com/{_store}",
+                    _store_home,
                     wait_until="domcontentloaded",
                     timeout=20_000,
                 )
@@ -941,15 +970,24 @@ class NaverStoreCrawler:
     # Stage 4 : Naver REST API (Web Unlocker API 우선, curl_cffi 폴백)
     # ------------------------------------------------------------
 
-    def _try_api(self, product_id: str, store_name: str) -> Optional[dict]:
+    def _try_api(self, product_id: str, store_name: str, is_brand: bool = False) -> Optional[dict]:
         import time
 
-        endpoints = [
-            f"https://smartstore.naver.com/main/v1/products/no/{product_id}",
-            f"https://smartstore.naver.com/i/v1/products/{product_id}",
-            f"https://smartstore.naver.com/main/v1/stores/{store_name}/products/{product_id}",
-            f"https://smartstore.naver.com/main/v2/products/{product_id}",
-        ]
+        if is_brand:
+            endpoints = [
+                f"https://brand.naver.com/main/v1/products/no/{product_id}",
+                f"https://brand.naver.com/i/v1/products/{product_id}",
+                f"https://brand.naver.com/main/v1/stores/{store_name}/products/{product_id}",
+                f"https://smartstore.naver.com/main/v1/products/no/{product_id}",
+                f"https://smartstore.naver.com/i/v1/products/{product_id}",
+            ]
+        else:
+            endpoints = [
+                f"https://smartstore.naver.com/main/v1/products/no/{product_id}",
+                f"https://smartstore.naver.com/i/v1/products/{product_id}",
+                f"https://smartstore.naver.com/main/v1/stores/{store_name}/products/{product_id}",
+                f"https://smartstore.naver.com/main/v2/products/{product_id}",
+            ]
 
         # ── 4-A: Bright Data Web Unlocker API (JSON 엔드포인트 우회) ──
         if self.api_key:
@@ -1146,7 +1184,7 @@ class NaverStoreCrawler:
         name          = self._get_name(node)
         sale_price    = self._get_price(node)
         delivery      = self._get_delivery(node, raw)
-        img_url       = self._get_image(node)
+        img_url       = self._get_image(node) or self._get_image(raw)
         barcode       = self._get_barcode(node, raw)
         options       = self._get_options(raw)
         naver_cat     = self._get_naver_category(node, raw)
@@ -1829,26 +1867,65 @@ class NaverStoreCrawler:
 
     @staticmethod
     def _get_image(node: dict) -> str:
-        candidates = [
-            node.get("representativeImageUrl"),
-            node.get("mainImageUrl"),
-            node.get("imageUrl"),
-        ]
+        _IMG_KEYS = (
+            "representativeImageUrl", "mainImageUrl", "imageUrl",
+            "productImageUrl", "representImageUrl", "thumbnailImageUrl",
+            "originalImageUrl", "channelProductImageUrl",
+        )
+        candidates: list = [node.get(k) for k in _IMG_KEYS]
+
         for lk in ("images", "productImages", "imageList"):
             items = node.get(lk) or []
-            if items:
+            if isinstance(items, list) and items:
                 first = items[0]
                 candidates.append(
-                    first if isinstance(first, str) else first.get("imageUrl")
+                    first if isinstance(first, str)
+                    else (first.get("imageUrl") or first.get("url") or first.get("src") or "")
                 )
+            elif isinstance(items, dict):
+                candidates.append(items.get("url") or items.get("imageUrl") or "")
+
+        # productImage 오브젝트 대응
+        pi = node.get("productImage")
+        if isinstance(pi, str):
+            candidates.append(pi)
+        elif isinstance(pi, dict):
+            candidates.append(pi.get("url") or pi.get("imageUrl") or "")
+
+        def _apply_type(u: str) -> str:
+            u = re.sub(r"type=\w+", "type=f640_640", u)
+            if "type=" not in u:
+                u += ("&" if "?" in u else "?") + "type=f640_640"
+            return u
+
         for url in candidates:
-            if not url:
-                continue
-            url = str(url)
-            url = re.sub(r"type=\w+", "type=f640_640", url)
-            if "type=" not in url:
-                url += ("&" if "?" in url else "?") + "type=f640_640"
-            return url
+            if url and isinstance(url, str) and url.startswith("http"):
+                return _apply_type(url)
+
+        # 노드 내 재귀 탐색 (brand store API 응답 대응)
+        def _search(d, depth=0):
+            if depth > 5 or not isinstance(d, dict):
+                return ""
+            for k in _IMG_KEYS:
+                v = d.get(k)
+                if isinstance(v, str) and v.startswith("http"):
+                    return v
+            for v in d.values():
+                if isinstance(v, dict):
+                    r = _search(v, depth + 1)
+                    if r:
+                        return r
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict):
+                            r = _search(item, depth + 1)
+                            if r:
+                                return r
+            return ""
+
+        found = _search(node)
+        if found:
+            return _apply_type(found)
         return ""
 
     # ------------------------------------------------------------
