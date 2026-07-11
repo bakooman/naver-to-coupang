@@ -271,11 +271,26 @@ class ExcelBuilder:
         gosisi_val_idx  = 0
         option_type_idx = 0   # 옵션유형 슬롯 (0=수량, 1=SAE점도, 2=개당용량)
         option_val_idx  = 0   # 옵션값   슬롯 (0=N개,   1=0w20,    2=1L)
+        _prev_was_model_col = False  # 아래 "인증∙신고" 특수처리용
 
         for cell in ws[header_row]:
             if not cell.value or not isinstance(cell.value, str):
                 continue
             val = cell.value.strip()
+
+            # 신규 Wing 템플릿: "모델번호"/"바코드" 컬럼이 "인증∙신고 등정보유형"/
+            # "인증∙신고 등 정보값"으로 라벨만 바뀜 (가이드 문구는 기존과 동일 —
+            # 모델번호/바코드 그대로). 같은 라벨이 뒤에 3번 더 반복되는데 이 첫
+            # 컬럼만 "등"과 "정보" 사이 공백이 없는 표기라 구분 가능.
+            if val == "인증∙신고 등정보유형":
+                col_map["model_number"] = cell.column
+                _prev_was_model_col = True
+                continue
+            if _prev_was_model_col and "정보값" in val:
+                col_map["gtin"] = cell.column
+                _prev_was_model_col = False
+                continue
+            _prev_was_model_col = False
 
             # 옵션유형 — 발견 순서대로 인덱스 부여 (최대 3슬롯 사용)
             if "옵션유형" in val and option_type_idx < 3:
