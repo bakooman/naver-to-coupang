@@ -3760,8 +3760,8 @@ _HISTORY_FILE = Path(__file__).parent / "data" / "collection_history.json"
 _MAX_HISTORY  = 20  # 최근 N회 보관
 
 # ── 계정(스토어)별 Wing 엑셀 템플릿 ────────────────────────────────
-# 포트 계정은 2026-07-11부터 "브랜드 ID"(브랜드명 아님) + 모델번호/바코드 컬럼
-# 제거된 신규 스키마를 요구함 (샵케이/제니스트레이딩은 기존 스키마 그대로 통과).
+# 2026-07-11: 포트 계정 신규 스키마("브랜드 ID" + 모델번호/바코드 컬럼 제거) 템플릿이
+# 샵케이/제니스트레이딩 계정에서도 정상 업로드되는 것을 확인 → 전 계정 통합 사용으로 전환.
 _PORT_TEMPLATE_PATH = _TMPL_ROOT / "sellertool_upload_포트.xlsm"
 
 
@@ -3773,8 +3773,8 @@ def _majority_store(entries: list) -> str:
 
 
 def _template_for_store(store: str) -> Optional[str]:
-    """계정명 → Wing 엑셀 템플릿 경로. 포트는 전용 템플릿, 그 외는 기존 공용 템플릿."""
-    if store == "포트" and _PORT_TEMPLATE_PATH.exists():
+    """Wing 엑셀 템플릿 경로. 전 계정(샵케이/제니스트레이딩/포트) 통합 템플릿 사용."""
+    if _PORT_TEMPLATE_PATH.exists():
         return str(_PORT_TEMPLATE_PATH)
     tmpl = _global_template_path.get("v") or ""
     return tmpl if tmpl and Path(tmpl).exists() else None
