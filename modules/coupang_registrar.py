@@ -1051,7 +1051,7 @@ class CoupangRegistrar:
         naver_brand: str,
         brand_alt: str = "",
         gemini_api_key: str = "",
-        gemini_model: str = "gemini-2.0-flash",
+        gemini_model: str = "gemini-2.5-flash",
     ) -> str:
         """
         네이버 브랜드명 → 쿠팡 공식 브랜드명(매칭 성공 시) 또는 원본 브랜드명(폴백).

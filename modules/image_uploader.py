@@ -36,12 +36,14 @@ def upload_pil(
     return _do_upload(buf.getvalue(), filename, mime)
 
 
-def upload_file(path: str | Path) -> Optional[str]:
-    """로컬 파일 경로 → R2 업로드 → 공개 URL 반환. 실패 시 None."""
+def upload_file(path: str | Path, key: str = "") -> Optional[str]:
+    """로컬 파일 경로 → R2 업로드 → 공개 URL 반환. 실패 시 None.
+    key 지정 시 R2 객체 키로 사용 (미지정 시 파일명 사용).
+    """
     p = Path(path)
     data = p.read_bytes()
     mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
-    return _do_upload(data, p.name, mime)
+    return _do_upload(data, key or p.name, mime)
 
 
 def upload_url(src_url: str, filename: str = "image.jpg") -> Optional[str]:

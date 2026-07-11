@@ -306,7 +306,7 @@ class ImageProcessor:
         text  = f"{qty}개"
 
         # ── 원 크기·위치 ────────────────────────────────────────
-        d      = int(min(W, H) * 0.215)  # 0.190 → 0.215 (글씨 크게)
+        d      = int(min(W, H) * 0.194)  # 0.215 → 0.194 (10% 축소)
         margin = int(min(W, H) * 0.028)
         cx     = margin + d // 2
         cy     = H - margin - d // 2

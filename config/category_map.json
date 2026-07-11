@@ -1339,6 +1339,57 @@
       "gosisi_cat": "기타 재화",
       "priority": 12
     },
+    "── 주방 > 접시/그릇/쟁반 ──────────────────────────────────────────": {},
+    "접시세트": {
+      "category_id": "80471",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 22
+    },
+    "양식기세트": {
+      "category_id": "80454",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 22
+    },
+    "일반접시": {
+      "category_id": "80468",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 20
+    },
+    "쟁반": {
+      "category_id": "80476",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 18
+    },
+    "양식기": {
+      "category_id": "80454",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 18
+    },
+    "서빙보드": {
+      "category_id": "80479",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 18
+    },
+    "샐러드볼": {
+      "category_id": "80463",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 18
+    },
+    "접시": {
+      "category_id": "80468",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 14
+    },
+    "Tray": {
+      "category_id": "80476",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 16
+    },
+    "Plate": {
+      "category_id": "80468",
+      "gosisi_cat": "생활용품 (공산품)",
+      "priority": 14
+    },
     "── 가전 > 정수기 필터/액세서리 ────────────────────────────": {},
     "정수기필터": {
       "category_id": "63714",

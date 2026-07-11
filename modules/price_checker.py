@@ -36,6 +36,7 @@ import asyncio
 import datetime
 import json
 import re
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -44,9 +45,32 @@ from typing import Optional
 import requests
 import urllib3
 
+try:
+    from curl_cffi import requests as cffi_requests
+    _CFFI_OK = True
+except ImportError:
+    cffi_requests = None
+    _CFFI_OK = False
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-_DATA_FILE = Path(__file__).parent.parent / "data" / "price_watch.json"
+_DATA_FILE   = Path(__file__).parent.parent / "data" / "price_watch.json"
+_CONFIG_FILE = Path(__file__).parent.parent / "data" / "config.json"
+
+# 중복 실행 방지 — 스케줄러 + 수동 체크 동시 실행 차단
+_check_lock = threading.Lock()
+
+
+def _load_naver_cookie_str() -> str:
+    """config.json의 naver_cookies를 Cookie 헤더 문자열로 반환."""
+    try:
+        cfg = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+        nc  = cfg.get("naver_cookies", {})
+        if nc:
+            return "; ".join(f"{k}={v}" for k, v in nc.items())
+    except Exception:
+        pass
+    return ""
 
 _HEADERS = {
     "User-Agent": (
@@ -58,50 +82,6 @@ _HEADERS = {
     "Accept-Language": "ko-KR,ko;q=0.9",
     "Referer": "https://smartstore.naver.com/",
 }
-
-_BRIGHTDATA_API_URL  = "https://api.brightdata.com/request"
-_BRIGHTDATA_ZONE     = "web_unlocker1"
-
-
-def _get_brightdata_key() -> str:
-    """settings에서 BrightData API 키 조회."""
-    try:
-        from config.settings import Settings
-        return getattr(Settings, "BRIGHTDATA_API_KEY", "") or ""
-    except Exception:
-        return ""
-
-
-def _brightdata_fetch(url: str, timeout: int = 90) -> Optional[str]:
-    """
-    BrightData Web Unlocker API를 통해 HTML 반환.
-    API 키 없거나 실패 시 None 반환.
-    """
-    api_key = _get_brightdata_key()
-    if not api_key:
-        return None
-    try:
-        resp = requests.post(
-            _BRIGHTDATA_API_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type":  "application/json",
-            },
-            json={
-                "zone":   _BRIGHTDATA_ZONE,
-                "url":    url,
-                "format": "raw",
-            },
-            timeout=timeout,
-            verify=False,
-        )
-        if resp.status_code == 200:
-            return resp.text
-        print(f"[PriceChecker] BrightData 오류 {resp.status_code}: {resp.text[:200]}")
-        return None
-    except Exception as e:
-        print(f"[PriceChecker] BrightData 요청 실패: {e}")
-        return None
 
 _SIGNALS = {"salePrice", "productName", "productNo", "name", "price"}
 
@@ -129,6 +109,7 @@ class PriceWatch:
     history:       list[dict]    = field(default_factory=list)
     acked:         bool          = False # 확인완료 처리됨 — True면 재알림 억제
     store:         str           = "샵케이"  # "샵케이" / "제니스 트레이딩"
+    alerted:       bool          = False # 텔레그램 발송 완료 — True면 다음 스케줄에서 재발송 차단
 
 
 def _now_str() -> str:
@@ -200,21 +181,54 @@ def _fetch_product_info(url: str, timeout: int = 12) -> dict:
     """
     URL → {"name": str, "price": int, "soldout": bool, "error": str}
 
-    1순위) BrightData Web Unlocker (봇 차단 우회)
-    2순위) 직접 requests (BrightData 키 없을 때 fallback)
-    __PRELOADED_STATE__ 우선 파싱 → meta tag fallback.
+    1순위) 직접 requests → __PRELOADED_STATE__ 파싱
+    2순위) 직접 응답 → meta tag 파싱
     """
-    # ── 1순위: BrightData Web Unlocker ───────────────────────────
-    html = _brightdata_fetch(url, timeout=90)
+    # ── 1순위: curl_cffi (Chrome TLS 핑거프린트 위장, 없으면 requests 폴백) ──
+    html = None
+    direct_html = None
+    _fetch_err = ""
+    try:
+        _req_headers = {**_HEADERS}
+        _cookie = _load_naver_cookie_str()
+        if _cookie:
+            _req_headers["Cookie"] = _cookie
+        if _CFFI_OK:
+            resp = cffi_requests.get(
+                url, impersonate="chrome", headers=_req_headers, timeout=timeout
+            )
+        else:
+            resp = requests.get(url, headers=_req_headers, timeout=timeout, verify=False)
+        if resp.status_code == 200:
+            direct_html = resp.text
+            if "__PRELOADED_STATE__" in resp.text:
+                html = resp.text
+            else:
+                _fetch_err = f"HTTP 200 but no PRELOADED_STATE (login page?)"
+        else:
+            _fetch_err = f"HTTP {resp.status_code}"
+    except Exception as _e:
+        _fetch_err = str(_e)
 
-    # ── 2순위: 직접 요청 (BrightData 키 없거나 실패 시) ──────────
-    if html is None:
+    # ── 2순위: 직접 응답 meta tag 파싱 ───────────────────────────
+    if html is None and direct_html:
+        import bs4 as _bs4e
+        _soup_e = _bs4e.BeautifulSoup(direct_html, "html.parser")
+        def _me(prop: str) -> str:
+            t = _soup_e.find("meta", property=prop) or _soup_e.find("meta", attrs={"name": prop})
+            return (t.get("content", "") if t else "").strip()
+        _ps = _me("kakao:commerce:price") or _me("product:price:amount") or ""
         try:
-            resp = requests.get(url, headers=_HEADERS, timeout=timeout, verify=False)
-            resp.raise_for_status()
-            html = resp.text
-        except Exception as e:
-            return {"name": "", "price": 0, "soldout": False, "error": str(e)}
+            _ep = int(re.sub(r"[^\d]", "", _ps))
+        except Exception:
+            _ep = 0
+        if _ep > 0:
+            _en = (_me("og:title") or _me("product:title") or "").strip()
+            _so = "out" in (_me("product:availability") or "").lower()
+            return {"name": _en, "price": _ep, "soldout": _so, "error": ""}
+
+    if html is None:
+        return {"name": "", "price": 0, "soldout": False, "error": _fetch_err or "fetch failed"}
 
     # ── __PRELOADED_STATE__ 파싱 ─────────────────────────────────
     raw: Optional[dict] = None
@@ -467,6 +481,7 @@ def all_watches() -> list[PriceWatch]:
 
 def check_one(pw: PriceWatch) -> PriceWatch:
     """단일 상품 가격/품절 체크 → PriceWatch 갱신."""
+    _prev_status = pw.status  # 상태 변화 감지용 (alerted 초기화 판단)
     info = _fetch_product_info(pw.url)
     now  = _now_str()
 
@@ -519,19 +534,12 @@ def check_one(pw: PriceWatch) -> PriceWatch:
             pw.base_price = new_price  # 재입고 시점 가격을 새 기준가로
             pw.change = 0
         else:
-            # 품절 이력 없음 → acked 해제 후 일반 가격 비교
+            # 품절 이력 없음 → acked 해제, base_price를 현재가로 교정 후 정상 처리
             pw.acked = False
-            if pw.base_price > 0 and new_price > 0:
-                pw.change = new_price - pw.base_price
-                if pw.change > 0:
-                    pw.status = "risen"
-                elif pw.change < 0:
-                    pw.status = "fallen"
-                else:
-                    pw.status = "ok"
-            else:
-                pw.status = "ok"
-                pw.change = 0
+            if new_price > 0:
+                pw.base_price = new_price  # 확인완료 시점 가격 기준으로 리셋 → 즉시 재알림 방지
+            pw.status = "ok"
+            pw.change = 0
     elif new_price > 0 and pw.base_price > 0:
         pw.change = new_price - pw.base_price
         if pw.change > 0:
@@ -544,6 +552,15 @@ def check_one(pw: PriceWatch) -> PriceWatch:
         pw.status = "ok"
         pw.change = 0
 
+    # alerted 초기화:
+    # ① 상태 변화 → 새 이벤트 발생 → 즉시 알림
+    # ② 조회 성공 후 여전히 이상 상태 + 미확인(acked=False) → 재알림 허용
+    #    (조회 실패 시엔 이 코드에 도달하지 않으므로 stale alerted=True 유지)
+    if pw.status != _prev_status:
+        pw.alerted = False
+    elif pw.status in ("risen", "fallen", "soldout", "restocked") and not pw.acked:
+        pw.alerted = False
+
     print(
         f"[PriceChecker] {name[:30]} | "
         f"{pw.base_price:,}→{new_price:,}원 | "
@@ -552,7 +569,7 @@ def check_one(pw: PriceWatch) -> PriceWatch:
     return pw
 
 
-def check_all(log_cb=None, batch_size: int = 500, workers_per_batch: int = 10) -> dict:
+def check_all(log_cb=None, batch_size: int = 500, workers_per_batch: int = 4) -> dict:
     """
     전체 감시 목록 일괄 체크 — 배치 병렬 처리.
 
@@ -560,12 +577,24 @@ def check_all(log_cb=None, batch_size: int = 500, workers_per_batch: int = 10) -
     - 배치당 workers_per_batch 개 스레드 (기본 500개 × 10스레드 = 배치당 병렬)
     - 항목마다 즉시 저장 → 중단돼도 진행분 보존
     - log_cb(msg, done, total) 형태로 진행 상황 전달
+    - 스케줄러 + 수동 체크 동시 실행 차단 (_check_lock)
 
     Returns:
         {"risen": int, "fallen": int, "soldout": int, "ok": int, "errors": int,
          "done": int, "total": int}
     """
-    import threading
+    _EMPTY = {"risen": 0, "fallen": 0, "soldout": 0, "ok": 0, "errors": 0, "done": 0, "total": 0}
+    if not _check_lock.acquire(blocking=False):
+        print("[PriceChecker] 이미 체크 중 — 중복 실행 차단 (스케줄러/수동 동시 방지)")
+        return _EMPTY
+    try:
+        return _check_all_inner(log_cb=log_cb, batch_size=batch_size, workers_per_batch=workers_per_batch)
+    finally:
+        _check_lock.release()
+
+
+def _check_all_inner(log_cb=None, batch_size: int = 500, workers_per_batch: int = 4) -> dict:
+    """check_all 실제 처리 — _check_lock 획득 후 호출."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     watches = _load()
@@ -688,7 +717,8 @@ def reset_base_price(uid: str) -> None:
             w.base_price = w.current_price
             w.status     = "ok"
             w.change     = 0
-            w.acked      = True  # 다음 체크에서 같은 상태로 재알림 억제
+            w.acked      = True   # 다음 체크에서 같은 상태로 재알림 억제
+            w.alerted    = False  # 확인완료 후 alerted 초기화 (새 변동 시 재발송)
             # 재입고 확인완료 시 → 히스토리 품절 기록 초기화
             # (남아있으면 다음 체크 때 acked=True + 품절이력 → 재입고 재알림 반복되는 버그 방지)
             if hasattr(w, "history") and isinstance(w.history, list):
@@ -715,6 +745,113 @@ def reset_all_base_prices() -> int:
     _save(watches)
     print(f"[PriceChecker] 전체 기준가 리셋 완료: {count}개 (품절 항목 제외)")
     return count
+
+
+def get_watchlist_for_export() -> list:
+    """로컬 PC 가격체크 스크립트에 전달할 watchlist."""
+    return [
+        {"uid": w.uid, "url": w.url, "name": w.name,
+         "base_price": w.base_price, "current_price": w.current_price,
+         "status": w.status}
+        for w in _load()
+    ]
+
+
+def process_price_report(results: list) -> dict:
+    """
+    로컬 PC에서 수집한 가격 데이터 처리.
+    results: [{"uid": str, "price": int, "soldout": bool, "name": str, "error": str}, ...]
+    """
+    if not _check_lock.acquire(blocking=False):
+        print("[PriceChecker] 이미 체크 중 — 로컬 리포트 처리 대기")
+        _check_lock.acquire()
+        _check_lock.release()
+        return {"error": "was_locked"}
+    try:
+        return _process_price_report_inner(results)
+    finally:
+        _check_lock.release()
+
+
+def _process_price_report_inner(results: list) -> dict:
+    watches = _load()
+    uid_map  = {pw.uid: i for i, pw in enumerate(watches)}
+    stats    = {"risen": 0, "fallen": 0, "soldout": 0, "restocked": 0,
+                "ok": 0, "errors": 0, "total": len(results)}
+    now      = _now_str()
+
+    for r in results:
+        uid = r.get("uid", "")
+        if uid not in uid_map:
+            continue
+        idx = uid_map[uid]
+        pw  = watches[idx]
+
+        # 조회 실패
+        if r.get("error") and not r.get("price"):
+            pw.last_checked = now
+            stats["errors"] += 1
+            watches[idx] = pw
+            continue
+
+        new_price     = r.get("price", 0)
+        soldout       = r.get("soldout", False)
+        name          = r.get("name") or pw.name
+        _prev_status  = pw.status
+        _old_current  = pw.current_price
+
+        pw.name          = name
+        pw.last_checked  = now
+        pw.current_price = new_price
+
+        _record_soldout = soldout and not pw.acked
+        pw.history.append({"ts": now, "price": new_price, "soldout": _record_soldout})
+        if len(pw.history) > 200:
+            pw.history = pw.history[-200:]
+
+        if (pw.base_price == 0 or _old_current == 0) and new_price > 0:
+            pw.base_price = new_price
+
+        # 상태 판정 (check_one 과 동일 로직)
+        if soldout:
+            if pw.acked:
+                pw.status = "ok";  pw.change = 0
+            else:
+                pw.status = "soldout";  pw.change = 0
+        elif pw.acked:
+            _was_soldout = any(h.get("soldout") for h in pw.history[-10:])
+            if _was_soldout:
+                pw.status = "restocked";  pw.acked = False
+                pw.base_price = new_price;  pw.change = 0
+            else:
+                pw.acked = False
+                if new_price > 0:
+                    pw.base_price = new_price
+                pw.status = "ok";  pw.change = 0
+        elif new_price > 0 and pw.base_price > 0:
+            pw.change = new_price - pw.base_price
+            pw.status = "risen" if pw.change > 0 else ("fallen" if pw.change < 0 else "ok")
+        else:
+            pw.status = "ok";  pw.change = 0
+
+        # alerted 초기화 — 상태가 바뀔 때만 초기화 (같은 상태 유지 시 재발송 차단)
+        if pw.status != _prev_status:
+            pw.alerted = False
+
+        key = pw.status if pw.status in stats else "ok"
+        stats[key] += 1
+        watches[idx] = pw
+
+    _save(watches, check_state={
+        "in_progress": False, "done": len(results),
+        "total": len(results), "started_at": "",
+    })
+
+    print(f"[가격체크 로컬] 완료 — 상승:{stats['risen']} 하락:{stats['fallen']} "
+          f"품절:{stats['soldout']} 정상:{stats['ok']} 오류:{stats['errors']}")
+
+    _send_price_alert({}, _load())
+    return stats
 
 
 def has_alerts() -> bool:
@@ -753,12 +890,13 @@ def _send_price_alert(result: dict, watches: list) -> None:
     except Exception:
         return
 
-    risen   = [w for w in watches if w.status == "risen"]
-    fallen  = [w for w in watches if w.status == "fallen"]
-    soldout = [w for w in watches if w.status == "soldout"]
+    # alerted=True 항목은 이미 발송 완료 → 재발송 차단
+    risen   = [w for w in watches if w.status == "risen"   and not w.alerted]
+    fallen  = [w for w in watches if w.status == "fallen"  and not w.alerted]
+    soldout = [w for w in watches if w.status == "soldout" and not w.alerted]
 
     if not risen and not fallen and not soldout:
-        return  # 이상 없음 → 발송 안 함
+        return  # 이상 없음 or 모두 발송 완료 → 발송 안 함
 
     lines = ["📊 <b>[가격변동 알림]</b>"]
 
@@ -800,6 +938,13 @@ def _send_price_alert(result: dict, watches: list) -> None:
     ok = send_notification(msg)
     if ok:
         print("[PriceChecker] 텔레그램 알림 발송 완료")
+        # 발송된 항목 alerted=True 마킹 → 다음 스케줄에서 재발송 차단
+        notified_uids = {w.uid for w in risen + fallen + soldout}
+        all_ws = _load()
+        for w in all_ws:
+            if w.uid in notified_uids:
+                w.alerted = True
+        _save(all_ws)
     else:
         print("[PriceChecker] 텔레그램 알림 발송 실패 (설정 확인)")
 
@@ -820,6 +965,3 @@ async def run_scheduler(log_cb=None) -> None:
         print(f"[PriceChecker] 정기 체크 시작: {_now_str()}")
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: check_all(log_cb))
-        # 체크 완료 후 이상 항목 텔레그램 발송
-        watches = _load()
-        await loop.run_in_executor(None, lambda: _send_price_alert({}, watches))

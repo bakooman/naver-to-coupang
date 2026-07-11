@@ -76,113 +76,49 @@ def _extract_specs(raw_json: dict, depth: int = 0) -> dict[str, str]:
 
 def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
     """
-    PIL + BeautifulSoup 으로 HTML → PNG 이미지 bytes 렌더링.
-    Playwright/Chromium 없이 서버에서 동작.
+    Playwright(Chromium) 로 HTML → PNG 렌더링.
+    NotoColorEmoji 폰트 지원 → 이모지 완벽 출력.
     """
+    full_html = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
+        "* { box-sizing: border-box; margin: 0; padding: 0; }"
+        "body {"
+        "  font-family: 'NanumGothic', 'Malgun Gothic', sans-serif;"
+        "  font-size: 19px; line-height: 1.75;"
+        "  color: #1e293b; background: #ffffff;"
+        f" padding: 36px 44px; width: {width}px;"
+        "}"
+        "h3 {"
+        "  font-size: 26px; font-weight: 700; color: #0f172a;"
+        "  margin-bottom: 14px; padding: 14px 18px;"
+        "  background: #f0f6ff; border-left: 5px solid #3b82f6;"
+        "  border-radius: 4px;"
+        "}"
+        "h4 {"
+        "  font-size: 20px; font-weight: 700; color: #1e40af;"
+        "  margin-top: 26px; margin-bottom: 10px;"
+        "  padding-bottom: 6px; border-bottom: 2px solid #dbeafe;"
+        "}"
+        "p { margin-bottom: 14px; color: #334155; }"
+        "ul { padding-left: 0; margin-bottom: 14px; list-style: none; }"
+        "li { padding: 5px 0; color: #475569; }"
+        "strong { color: #0f172a; font-weight: 700; }"
+        "</style></head><body>"
+        + html_body
+        + "</body></html>"
+    )
     try:
-        import io
-        import textwrap as _tw
-        from bs4 import BeautifulSoup
-        from PIL import Image as _Img, ImageDraw as _Draw, ImageFont as _Font
-
-        _FONT_PATHS = [
-            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
-            "C:/Windows/Fonts/malgunsl.ttf",
-            "C:/Windows/Fonts/malgun.ttf",
-            "data/fonts/NotoSansKR-Light.otf",
-        ]
-
-        def _font(size: int) -> _Font.ImageFont:
-            for p in _FONT_PATHS:
-                try:
-                    return _Font.truetype(p, size)
-                except Exception:
-                    pass
-            return _Font.load_default()
-
-        soup = BeautifulSoup(html_body, "html.parser")
-
-        # ── 렌더링할 블록 수집 ────────────────────────────────
-        # (tag, text) 리스트
-        blocks: list[tuple[str, str]] = []
-        for el in soup.find_all(["h3", "p", "li"]):
-            text = el.get_text(" ", strip=True)
-            if text:
-                blocks.append((el.name, text))
-
-        if not blocks:
-            return None
-
-        PAD_X     = 32
-        PAD_Y     = 28
-        LINE_H_P  = 26   # p/li 행 간격
-        LINE_H_H3 = 34   # h3 행 간격
-        FONT_P    = _font(16)
-        FONT_H3   = _font(20)
-        CHAR_W    = width - PAD_X * 2  # 텍스트 가용 픽셀 폭
-
-        # 한글 문자 실제 폭을 PIL로 측정해서 줄바꿈 계산
-        def _measure(text: str, font) -> int:
-            try:
-                return int(font.getlength(text))
-            except Exception:
-                try:
-                    return font.getbbox(text)[2]
-                except Exception:
-                    return len(text) * 16
-
-        def _wrap_text(text: str, font, max_w: int) -> list[str]:
-            """픽셀 폭 기준 텍스트 줄바꿈."""
-            if _measure(text, font) <= max_w:
-                return [text]
-            lines, cur = [], ""
-            for ch in text:
-                if _measure(cur + ch, font) > max_w:
-                    if cur:
-                        lines.append(cur)
-                    cur = ch
-                else:
-                    cur += ch
-            if cur:
-                lines.append(cur)
-            return lines or [text]
-
-        # ── 1패스: 총 높이 계산 ───────────────────────────────
-        total_h = PAD_Y
-        for tag, text in blocks:
-            if tag == "h3":
-                lines_h3 = _wrap_text(text, FONT_H3, CHAR_W)
-                total_h += len(lines_h3) * LINE_H_H3 + 8 + 14
-            else:
-                prefix = "• " if tag == "li" else ""
-                lines_p = _wrap_text(prefix + text, FONT_P, CHAR_W)
-                total_h += len(lines_p) * LINE_H_P + 6
-        total_h += PAD_Y
-
-        # ── 2패스: 실제 그리기 ────────────────────────────────
-        img = _Img.new("RGB", (width, max(total_h, 100)), (255, 255, 255))
-        draw = _Draw.Draw(img)
-        y = PAD_Y
-
-        for tag, text in blocks:
-            if tag == "h3":
-                for line in _wrap_text(text, FONT_H3, CHAR_W):
-                    draw.text((PAD_X, y), line, font=FONT_H3, fill=(26, 26, 26))
-                    y += LINE_H_H3
-                draw.line([(PAD_X, y), (width - PAD_X, y)], fill=(220, 220, 220), width=2)
-                y += 8 + 14
-            else:
-                prefix = "• " if tag == "li" else ""
-                for line in _wrap_text(prefix + text, FONT_P, CHAR_W):
-                    draw.text((PAD_X, y), line, font=FONT_P, fill=(68, 68, 68))
-                    y += LINE_H_P
-                y += 6
-
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        return buf.getvalue()
-
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+            page = browser.new_page(viewport={"width": width, "height": 800})
+            page.set_content(full_html, wait_until="domcontentloaded")
+            height = page.evaluate("document.body.scrollHeight")
+            page.set_viewport_size({"width": width, "height": max(height + 20, 200)})
+            img_bytes = page.screenshot(full_page=False, type="png")
+            browser.close()
+            print(f"[Gemini] Playwright 렌더링 완료 ({len(img_bytes):,} bytes)")
+            return img_bytes
     except Exception as e:
         print(f"[Gemini] HTML→이미지 렌더링 실패: {e}")
         return None
@@ -193,7 +129,7 @@ def generate_detail_image_url(
     image_url: str,
     raw_json: dict,
     api_key: str,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-2.5-flash",
     upload_fn=None,        # R2 업로드 함수: bytes → str(url) 또는 None
     product_id: str = "",  # R2 파일명용
 ) -> str:
@@ -297,7 +233,8 @@ def _generate_text(
                - 다이어트, 체중감량, 지방분해, 식욕억제, 살빠지는, 키가 크는,
                  면역력(증진·향상·강화), 항산화, 혈액순환 개선, 간기능 개선,
                  간건강, 피로회복, 집중력 향상, 피부 수분 보충, 노화 방지,
-                 체지방 감소 등 건강기능식품 기능성 표현 일체 금지
+                 체지방 감소, 키토제닉, 저탄고지, 순탄수, 저탄수화물 고지방,
+                 키토, 배변활동 원활, 장 건강에 도움 등 건강기능식품 기능성 표현 일체 금지
                - 건강기능식품 인증을 받지 않은 일반 가공식품에 위 표현 절대 불가
 
             ⑦ 거짓·과장·소비자 기만 표현 금지 (식품표시광고법 제8조 1항 4·5호)
@@ -305,16 +242,30 @@ def _generate_text(
                - "3일에 5kg 감량", "15일 섭취 후 4.1kg 감량" 등 구체적 수치 효과 금지
                - 의사·한의사·전문가 추천·개발 표현 금지
                - 슈퍼푸드(Super food), GI지수, 당부하지수 등 기준 불명확 표현 금지
+               - 신체조직 효능 표현 금지: 디톡스, 지방연소, 독소배출, 해독주스,
+                 피부재생, 노폐물 제거, 혈관 청소 등 신체 내부 작용 표현 일체 금지
 
             ⑧ 부당 비교·최상급 표현 금지 (식품표시광고법 제8조 1항 7호)
                - 유일, 최고, 최상, 최적, 최대(기능성 관련), 고단위, 고순도, 고농도,
                  새로운 패러다임, 청정지역(증빙 없이) 등 근거 없는 절대적 표현 금지
                - 타 제품 성분 함량과 자사 제품 비교 금지
 
-            ⑨ 소비자 기만 "무첨가" 표현 금지
+            ⑨ 소비자 기만 "무첨가·영양성분 강조" 표현 금지
                - 해당 식품에 원래 사용 불가한 원재료·첨가물에 "무첨가" 표현 금지
                - 무MSG, MSG 무첨가, 무방부제, 방부제 무첨가 표현 금지
                - 제품에 포함된 성분에 대해 "무첨가" 표현 금지
+               - 당류 관련 강조 표현 전면 금지: 무설탕, 무당, 무당류, 저당, 저당도,
+                 제로슈거, 슈거프리, 당류 0, 설탕 무첨가, 설탕 없음, 당분 없음 등
+                 (식약처 인증·식품공전 기준 충족 여부 확인 불가이므로 일체 사용 금지)
+               - 기타 영양성분 강조 표현 금지: 무지방, 저지방, 무칼로리, 저칼로리,
+                 칼로리 제로, 무나트륨, 저나트륨, 저염, 고단백, 고식이섬유 등
+                 (식약처 기준치 충족 인증 없이는 일체 사용 불가)
+               - 대신 이렇게 표현하세요: 성분표나 스펙에 해당 수치가 있으면
+                 "당류 X g 함유" 처럼 사실 수치 그대로 표기하거나 언급을 생략하세요.
+               - 원료·성분명의 효능을 제품 효능처럼 표현 금지 (소비자 기만):
+                 "콜라겐이 피부 탄력", "오메가3가 혈액순환", "비타민D가 면역력",
+                 "사포닌이 간 보호", "녹차가 체지방 감소", "유산균이 면역 증강" 등
+                 원료/성분 이름 + 건강 효능 조합 표현은 어떤 형태로도 사용 금지
 
             ⑩ 친환경 표현 제한
                - 친환경 인증(유기농·무항생제 등) 없이 "친환경", "자연친화적",
@@ -366,6 +317,16 @@ def _generate_text(
                스펙 정보에 있더라도 제외하세요.
             7. 애매하면 쓰지 마세요: 금지 여부가 불확실한 표현은 과감히 제거하고
                제품의 실제 사용감·기능·구성 설명으로 대체하세요.
+            8. h3 대제목은 소비자 감성·혜택을 담은 임팩트 있는 한 문장으로 작성하세요.
+               상품명 단순 반복 금지. 구체적 혜택·감성 중심.
+               예: "한 스푼으로 완성되는 진한 풍미의 여유"
+            9. h4 소제목으로 섹션을 구분하세요. 2~4글자로 간결하게.
+               예: <h4>제품 정보</h4> / <h4>이렇게 즐기세요</h4> / <h4>구성</h4>
+            10. li 항목은 반드시 • 기호로 시작하세요 (특수문자 사용 금지).
+                예: <li>• 브랜드: OOO</li> / <li>• 용량: 250ml</li>
+            11. 핵심 이점 문장은 <strong> 태그로 강조하세요.
+                예: <p><strong>진하고 달콤한 모카 풍미</strong>가 한 스틱으로 완성됩니다.</p>
+            12. 마지막에 구매를 자연스럽게 유도하는 마무리 p 태그를 추가하세요.
 
             ══════════════════════════════════════════
             [입력 정보]
@@ -377,12 +338,19 @@ def _generate_text(
             {f"[상품 속성/스펙]{chr(10)}{spec_text}" if spec_text else ""}
 
             ══════════════════════════════════════════
-            [출력 형식]
+            [출력 구조 — 반드시 이 순서로]
             ══════════════════════════════════════════
-            - h3 태그(제목)와 p 태그(단락)로 구성
-            - 스펙·성분은 ul/li 태그로 정리
+            ① <h3> 대제목 1개 (감성·혜택 중심, 임팩트 있는 문장)
+            ② <p> 소개 문단 1~2개 (핵심 특징 서술, <strong> 적극 활용)
+            ③ <h4> 소제목 + <ul><li> (스펙/성분/구성 리스트, • 기호 필수)
+            ④ <h4> 소제목 + <p> (활용법·사용 상황)
+            ⑤ <p> 구매 유도 마무리 문장 1개
+
+            규칙:
             - 마크다운 금지, HTML 태그만 사용
-            - 전체 600자 내외
+            - h3·h4 제목에 관련 이모지 1개씩 앞에 붙여 화려하게 (예: 💧 촉촉한 수분감, ✨ 주요 성분)
+            - li 항목은 • 기호로 시작 (이모지 추가 가능)
+            - 전체 750자 내외
         """).strip()
 
         parts = [types.Part.from_text(text=prompt)]
@@ -408,7 +376,7 @@ def _generate_text(
 def generate_compliant_product_name(
     raw_name: str,
     api_key: str,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-2.5-flash",
 ) -> str:
     """
     네이버에서 가져온 원본 상품명을 쿠팡 정책·식품표시광고법·표시광고법에
@@ -445,6 +413,10 @@ def generate_compliant_product_name(
               항산화, 혈액순환, 간기능, 피로회복, 집중력 향상 등
             - 부당 비교: 1위, 최고, 최상, 최초, 유일한, 고단위, 고순도, 고농도
             - 소비자 기만: 무MSG, 무방부제, 친환경(인증 없이), 무독성(인증 없이)
+            - 영양성분 강조: 무설탕, 무당류, 저당, 제로슈거, 슈거프리, 설탕 무첨가,
+              무지방, 저지방, 무칼로리, 저칼로리, 칼로리 제로, 무나트륨, 저나트륨,
+              저염, 고단백, 고식이섬유 등 (식약처 인증 없이 강조 불가)
+              → 대체: 해당 표현 제거 또는 "당류 Xg" 처럼 수치 그대로 표기
 
             [표시광고법 위반 — 공산품]
             - 의료기기 오인: 족저근막염, 목디스크, 거북목, 일자목, 불면증,
@@ -491,7 +463,7 @@ def match_brand_with_gemini(
     naver_brand: str,
     coupang_candidates: list[dict],
     api_key: str,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-2.5-flash",
 ) -> Optional[dict]:
     """
     네이버 브랜드명과 쿠팡 브랜드 후보 목록을 비교해 가장 적합한 쿠팡 브랜드 반환.
