@@ -144,9 +144,9 @@ class ExcelBuilder:
         "상품고시정보 카테고리": "_gosisi_cat",
         "카테고리":              "category_id",
         "등록상품명":            "product_name",
-        # ⚠️ "브랜드 ID"를 "브랜드" 앞에 배치 (substring 충돌 방지)
-        # 포트 계정 신규 템플릿: 브랜드명 자유입력 → 브랜드 ID(코드) 필수로 변경됨
-        "브랜드 ID":             "brand_id",
+        # 포트 계정 신규 템플릿은 컬럼명이 "브랜드 ID"로 바뀌었지만, Wing이 브랜드명
+        # 텍스트를 그대로 받아 내부적으로 매칭함 (기존 "브랜드" 컬럼과 동일하게 처리)
+        "브랜드 ID":             "brand",
         "브랜드":                "brand",
         "제조사":                "manufacturer",
         "모델번호":              "model_number",
@@ -346,12 +346,7 @@ class ExcelBuilder:
             ws.cell(row=row, column=col_map["_sale_end"], value=None)
         w("category_id",  cat_id)
         w("product_name", item.product_name)
-        # 브랜드 ID 컬럼(포트 계정 신규 템플릿)은 등록된 코드만 허용 —
-        # 실제 브랜드 ID 매핑 데이터가 없으므로 "브랜드 없음"으로 고정 기입.
-        if "brand_id" in col_map:
-            w("brand_id", "브랜드 없음")
-        else:
-            w("brand", item.brand)
+        w("brand",        item.brand)
         w("manufacturer", mfr)
         w("model_number", item.model_number)
 
