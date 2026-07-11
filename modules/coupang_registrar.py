@@ -108,6 +108,9 @@ class CoupangRegistrar:
             self._proxy = {"http": socks5_url, "https": socks5_url}
             print(f"[Coupang] SOCKS5 터널 사용: 127.0.0.1:{port} → VPS {self._vps_host}")
 
+        self._enrolled_brands_cache: Optional[list[dict]] = None
+        self._brand_search_cache:    dict = {}
+
         print(f"[Coupang] vendor={self.vendor_id}  key={self.access_key[:8]}...")
 
     # ────────────────────────────────────────────────────────────
@@ -1014,20 +1017,20 @@ class CoupangRegistrar:
 
     def search_brands(self, keyword: str) -> list[dict]:
         """
-        쿠팡 브랜드 검색 API 호출.
+        쿠팡 브랜드 검색 API 호출 (전체 브랜드 카탈로그 대상 — 내 등록 여부 무관).
 
-        API: GET /v2/providers/seller_api/apis/api/v1/marketplace/meta/brands
-        params: keyword={브랜드명}
+        API: POST /v2/providers/seller_api/apis/api/v1/marketplace/brands/search
+        body: {"brandName": ..., "countPerPage": ..., "page": ...}
 
-        반환: [{"brandId": 12345, "brandName": "Nike"}, ...]
+        반환: [{"brandId": "KR-XXXXX", "brandName": "Nike"}, ...]
         """
         if not keyword or not keyword.strip():
             return []
 
         try:
-            data = self._get(
-                "/v2/providers/seller_api/apis/api/v1/marketplace/meta/brands",
-                {"keyword": keyword.strip()},
+            data = self._post(
+                "/v2/providers/seller_api/apis/api/v1/marketplace/brands/search",
+                {"brandName": keyword.strip(), "countPerPage": 10, "page": 1},
             )
             raw_list = data.get("data") or []
             if isinstance(raw_list, dict):
@@ -1037,16 +1040,14 @@ class CoupangRegistrar:
             for item in raw_list:
                 if not isinstance(item, dict):
                     continue
-                bid   = item.get("brandId") or item.get("id")
+                bid   = item.get("brandId")
                 bname = item.get("brandName") or item.get("name") or ""
                 if bid and bname:
-                    results.append({"brandId": int(bid), "brandName": str(bname)})
+                    results.append({"brandId": str(bid), "brandName": str(bname)})
             return results
         except Exception as e:
             print(f"[Coupang] 브랜드 검색 실패 (keyword={keyword}): {e}")
             return []
-
-    _enrolled_brands_cache: Optional[list[dict]] = None
 
     def get_enrolled_brands(self, force_refresh: bool = False) -> list[dict]:
         """
@@ -1078,22 +1079,24 @@ class CoupangRegistrar:
 
     def resolve_brand_id(self, brand_name: str, brand_alt: str = "") -> str:
         """
-        브랜드명 → Wing에 등록된 브랜드ID(KR-XXXXX). 매칭 실패 시 빈 문자열
+        브랜드명 → 쿠팡 브랜드ID(KR-XXXXX). 매칭 실패 시 빈 문자열
         (엑셀 빌더가 빈 문자열이면 "브랜드 없음"으로 대체 기입함).
+
+        쿠팡 전체 브랜드 카탈로그 검색(search_brands) 하나로 처리 — "내 브랜드에
+        추가" 여부와 무관하게 검색만으로 유효한 brandId가 나오는 것으로 확인됨.
         """
         if not brand_name or brand_name in ("해당없음", ""):
-            return ""
-
-        enrolled = self.get_enrolled_brands()
-        if not enrolled:
             return ""
 
         for cand_name in (brand_name, brand_alt):
             if not cand_name:
                 continue
-            for b in enrolled:
-                if self._brand_names_match(cand_name, b["brandName"]):
-                    return b["brandId"]
+            if cand_name not in self._brand_search_cache:
+                self._brand_search_cache[cand_name] = self.search_brands(cand_name)
+            for c in self._brand_search_cache[cand_name]:
+                if self._brand_names_match(cand_name, c["brandName"]):
+                    return c["brandId"]
+
         return ""
 
     def resolve_brand(
