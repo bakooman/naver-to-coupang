@@ -181,54 +181,27 @@ def _fetch_product_info(url: str, timeout: int = 12) -> dict:
     """
     URL → {"name": str, "price": int, "soldout": bool, "error": str}
 
-    1순위) 직접 requests → __PRELOADED_STATE__ 파싱
-    2순위) 직접 응답 → meta tag 파싱
+    1순위) 직접 requests
+    2순위) BrightData Web Unlocker (직접 요청 실패 시만)
+    __PRELOADED_STATE__ 우선 파싱 → meta tag fallback.
     """
-    # ── 1순위: curl_cffi (Chrome TLS 핑거프린트 위장, 없으면 requests 폴백) ──
+    # ── 1순위: 직접 요청 ─────────────────────────────────────────
     html = None
-    direct_html = None
-    _fetch_err = ""
     try:
-        _req_headers = {**_HEADERS}
-        _cookie = _load_naver_cookie_str()
-        if _cookie:
-            _req_headers["Cookie"] = _cookie
-        if _CFFI_OK:
-            resp = cffi_requests.get(
-                url, impersonate="chrome", headers=_req_headers, timeout=timeout
-            )
-        else:
-            resp = requests.get(url, headers=_req_headers, timeout=timeout, verify=False)
-        if resp.status_code == 200:
-            direct_html = resp.text
-            if "__PRELOADED_STATE__" in resp.text:
-                html = resp.text
-            else:
-                _fetch_err = f"HTTP 200 but no PRELOADED_STATE (login page?)"
-        else:
-            _fetch_err = f"HTTP {resp.status_code}"
-    except Exception as _e:
-        _fetch_err = str(_e)
+        resp = requests.get(url, headers=_HEADERS, timeout=timeout, verify=False)
+        resp.raise_for_status()
+        # 봇 차단 감지: __PRELOADED_STATE__ 없으면 실패로 간주
+        if resp.status_code == 200 and "__PRELOADED_STATE__" in resp.text:
+            html = resp.text
+    except Exception:
+        pass
 
-    # ── 2순위: 직접 응답 meta tag 파싱 ───────────────────────────
-    if html is None and direct_html:
-        import bs4 as _bs4e
-        _soup_e = _bs4e.BeautifulSoup(direct_html, "html.parser")
-        def _me(prop: str) -> str:
-            t = _soup_e.find("meta", property=prop) or _soup_e.find("meta", attrs={"name": prop})
-            return (t.get("content", "") if t else "").strip()
-        _ps = _me("kakao:commerce:price") or _me("product:price:amount") or ""
-        try:
-            _ep = int(re.sub(r"[^\d]", "", _ps))
-        except Exception:
-            _ep = 0
-        if _ep > 0:
-            _en = (_me("og:title") or _me("product:title") or "").strip()
-            _so = "out" in (_me("product:availability") or "").lower()
-            return {"name": _en, "price": _ep, "soldout": _so, "error": ""}
+    # ── 2순위: BrightData Web Unlocker (직접 요청 실패 시만) ─────
+    if html is None:
+        html = _brightdata_fetch(url, timeout=90)
 
     if html is None:
-        return {"name": "", "price": 0, "soldout": False, "error": _fetch_err or "fetch failed"}
+        return {"name": "", "price": 0, "soldout": False, "error": "fetch failed"}
 
     # ── __PRELOADED_STATE__ 파싱 ─────────────────────────────────
     raw: Optional[dict] = None

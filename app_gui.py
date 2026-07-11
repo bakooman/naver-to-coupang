@@ -4891,7 +4891,7 @@ def page_monitor() -> None:
                         _sel_store = _mon_store_sel.value or "샵케이"
                         for u in urls:
                             if "smartstore.naver.com" not in u and "brand.naver.com" not in u:
-                                ui.notify(f"네이버 스마트스토어 URL이 아닙니다: {u[:50]}", type="warning")
+                                ui.notify(f"네이버 SmartStore/Brand URL이 아닙니다: {u[:50]}", type="warning")
                                 continue
                             _pc.add_watch(u, store=_sel_store)
                             added += 1
@@ -10002,7 +10002,7 @@ def page() -> None:
             ui.notify(f"올바른 URL이 아닙니다 (https://... 형식으로 입력)", type="warning")
             return
         if "smartstore.naver.com" not in url and "brand.naver.com" not in url:
-            ui.notify("네이버 SmartStore / 브랜드스토어 URL만 지원합니다", type="warning")
+            ui.notify("네이버 SmartStore 또는 Brand URL만 지원합니다", type="warning")
             return
         if _is_duplicate_url(url, queue):
             ui.notify("이미 추가된 URL입니다 (같은 상품 ID).", type="warning")

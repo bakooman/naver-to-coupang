@@ -108,17 +108,127 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         + "</body></html>"
     )
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
-            page = browser.new_page(viewport={"width": width, "height": 800})
-            page.set_content(full_html, wait_until="domcontentloaded")
-            height = page.evaluate("document.body.scrollHeight")
-            page.set_viewport_size({"width": width, "height": max(height + 20, 200)})
-            img_bytes = page.screenshot(full_page=False, type="png")
-            browser.close()
-            print(f"[Gemini] Playwright 렌더링 완료 ({len(img_bytes):,} bytes)")
-            return img_bytes
+        import io
+        import textwrap as _tw
+        from bs4 import BeautifulSoup
+        from PIL import Image as _Img, ImageDraw as _Draw, ImageFont as _Font
+
+        _FONT_PATHS = [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "C:/Windows/Fonts/malgunsl.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+            "data/fonts/NotoSansKR-Light.otf",
+        ]
+        _FONT_BOLD_PATHS = [
+            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothicBold.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothicExtraBold.ttf",
+            "C:/Windows/Fonts/malgunbd.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+        ]
+
+        def _font(size: int, bold: bool = False) -> _Font.ImageFont:
+            paths = _FONT_BOLD_PATHS if bold else _FONT_PATHS
+            for p in paths:
+                try:
+                    return _Font.truetype(p, size)
+                except Exception:
+                    pass
+            if bold:
+                for p in _FONT_PATHS:
+                    try:
+                        return _Font.truetype(p, size)
+                    except Exception:
+                        pass
+            return _Font.load_default()
+
+        soup = BeautifulSoup(html_body, "html.parser")
+
+        # ── 렌더링할 블록 수집 ────────────────────────────────
+        # (tag, text) 리스트
+        blocks: list[tuple[str, str]] = []
+        TARGET_TAGS = {"h3", "p", "li"}
+        for el in soup.find_all(["h3", "p", "li"]):
+            # 부모 중에 같은 타겟 태그가 있으면 중첩 요소 → 건너뜀
+            if any(p.name in TARGET_TAGS for p in el.parents):
+                continue
+            text = el.get_text(" ", strip=True)
+            if text:
+                blocks.append((el.name, text))
+
+        if not blocks:
+            return None
+
+        PAD_X     = 32
+        PAD_Y     = 28
+        LINE_H_P  = 26   # p/li 행 간격
+        LINE_H_H3 = 36   # h3 행 간격
+        FONT_P    = _font(16)
+        FONT_H3   = _font(21, bold=True)
+        CHAR_W    = width - PAD_X * 2  # 텍스트 가용 픽셀 폭
+
+        # 한글 문자 실제 폭을 PIL로 측정해서 줄바꿈 계산
+        def _measure(text: str, font) -> int:
+            try:
+                return int(font.getlength(text))
+            except Exception:
+                try:
+                    return font.getbbox(text)[2]
+                except Exception:
+                    return len(text) * 16
+
+        def _wrap_text(text: str, font, max_w: int) -> list[str]:
+            """픽셀 폭 기준 텍스트 줄바꿈."""
+            if _measure(text, font) <= max_w:
+                return [text]
+            lines, cur = [], ""
+            for ch in text:
+                if _measure(cur + ch, font) > max_w:
+                    if cur:
+                        lines.append(cur)
+                    cur = ch
+                else:
+                    cur += ch
+            if cur:
+                lines.append(cur)
+            return lines or [text]
+
+        # ── 1패스: 총 높이 계산 ───────────────────────────────
+        total_h = PAD_Y
+        for tag, text in blocks:
+            if tag == "h3":
+                lines_h3 = _wrap_text(text, FONT_H3, CHAR_W)
+                total_h += len(lines_h3) * LINE_H_H3 + 8 + 14
+            else:
+                prefix = "• " if tag == "li" else ""
+                lines_p = _wrap_text(prefix + text, FONT_P, CHAR_W)
+                total_h += len(lines_p) * LINE_H_P + 6
+        total_h += PAD_Y
+
+        # ── 2패스: 실제 그리기 ────────────────────────────────
+        img = _Img.new("RGB", (width, max(total_h, 100)), (255, 255, 255))
+        draw = _Draw.Draw(img)
+        y = PAD_Y
+
+        for tag, text in blocks:
+            if tag == "h3":
+                for line in _wrap_text(text, FONT_H3, CHAR_W):
+                    draw.text((PAD_X, y), line, font=FONT_H3, fill=(26, 26, 26))
+                    y += LINE_H_H3
+                draw.line([(PAD_X, y), (width - PAD_X, y)], fill=(220, 220, 220), width=2)
+                y += 8 + 14
+            else:
+                prefix = "• " if tag == "li" else ""
+                for line in _wrap_text(prefix + text, FONT_P, CHAR_W):
+                    draw.text((PAD_X, y), line, font=FONT_P, fill=(68, 68, 68))
+                    y += LINE_H_P
+                y += 6
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
     except Exception as e:
         print(f"[Gemini] HTML→이미지 렌더링 실패: {e}")
         return None
@@ -340,17 +450,26 @@ def _generate_text(
             ══════════════════════════════════════════
             [출력 구조 — 반드시 이 순서로]
             ══════════════════════════════════════════
-            ① <h3> 대제목 1개 (감성·혜택 중심, 임팩트 있는 문장)
-            ② <p> 소개 문단 1~2개 (핵심 특징 서술, <strong> 적극 활용)
-            ③ <h4> 소제목 + <ul><li> (스펙/성분/구성 리스트, • 기호 필수)
-            ④ <h4> 소제목 + <p> (활용법·사용 상황)
-            ⑤ <p> 구매 유도 마무리 문장 1개
-
-            규칙:
+            - h3 태그(섹션 헤딩) + p 태그(단락) + ul/li(목록)으로 구성
             - 마크다운 금지, HTML 태그만 사용
-            - h3·h4 제목에 관련 이모지 1개씩 앞에 붙여 화려하게 (예: 💧 촉촉한 수분감, ✨ 주요 성분)
-            - li 항목은 • 기호로 시작 (이모지 추가 가능)
-            - 전체 750자 내외
+            - 전체 1,000자 이상 (풍부하고 설득력 있게)
+
+            [이모티콘 지침]
+            - 각 h3 헤딩 맨 앞에 반드시 관련 이모티콘 1개 포함
+              예) ☕ 제품 소개 / 🎯 이런 분들께 추천합니다 / 📝 테이스팅 노트 / 🌱 상품 필수 정보
+            - li 항목 끝에 맥락에 맞는 이모티콘 1개 배치 (과하지 않게, 내용당 1개)
+            - 첫 소개 단락 끝에도 분위기에 맞는 이모티콘 1~2개 포함
+
+            [글씨 굵기 지침]
+            - 단락(p) 안에서 핵심 특징·성분·용량·브랜드명 등 강조할 단어는 <strong> 태그로 감싸기
+              예) <p>엄선된 <strong>100% 아라비카</strong> 원두를 정교하게 블렌딩하여...</p>
+
+            [필수 섹션 구조]
+            1. 제품 핵심 소개 (h3 + p 1~2단락 — 제품의 정체성과 핵심 매력)
+            2. 이런 분들께 추천합니다 (h3 + ul/li 3~5개 — 추천 대상, 각 항목 끝 이모티콘)
+            3. 카테고리에 맞는 특징 섹션
+               예) 커피 → 테이스팅 노트 | 식품 → 원재료 특징 | 뷰티 → 주요 성분·사용감
+            4. 상품 필수 정보 (h3 + ul/li — 용량·원산지·포장 등 팩트 정보)
         """).strip()
 
         parts = [types.Part.from_text(text=prompt)]
