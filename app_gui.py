@@ -264,7 +264,10 @@ class _AuthMiddleware(_BaseHTTPMiddleware):
 
         # NiceGUI 내부 경로, API 엔드포인트는 인증 면제
         if (path.startswith("/_nicegui") or path == "/favicon.ico"
-                or path.startswith("/api/dp/")):
+                or path.startswith("/api/dp/")
+                or path == "/api/queue-status"
+                or path == "/api/watchlist"
+                or path == "/api/price-report"):
             return await call_next(request)
 
         # 인증 확인
@@ -1769,6 +1772,7 @@ def _clean_product_name(name: str) -> str:
     _BRACKET = re.compile(
         r'[\[\(【〔]'
         r'(?:당일\s*(?:출고|발송|배송)|오늘\s*(?:출고|발송|배송)'
+        r'|바로\s*(?:출고|발송|배송)|즉시\s*(?:출고|발송|배송)'
         r'|빠른\s*배송|로켓\s*배송|무료\s*배송|특급\s*배송|익일\s*배송'
         r'|공식(?:판매)?|정품|한국\s*정품|국내\s*정품|직수입|직영'
         r'|해외직구|해외배송|직배송|국내배송'
@@ -1794,6 +1798,8 @@ def _clean_product_name(name: str) -> str:
         r'^(?:'
         r'당일\s*(?:출고|발송|배송)'
         r'|오늘\s*(?:출고|발송|배송)'
+        r'|바로\s*(?:출고|발송|배송)'
+        r'|즉시\s*(?:출고|발송|배송)'
         r'|빠른\s*배송|익일\s*배송|특급\s*배송'
         r'|무료\s*배송|로켓\s*배송|직배송'
         r')\s*[\s,\-_]*',
@@ -1957,6 +1963,52 @@ async def _process_entry(
             )
         entry.product_name = product.name
         entry.naver_price  = product.price   # 네이버 원가(1개) — 가격감시 기준가용
+
+        # ── 코지타벨리니 전용: 영문 상품명 → 한글 변환 ─────────────────
+        if "cositabellini" in entry.url.lower() and product.name:
+            try:
+                import google.genai as _genai2
+                from google.genai import types as _gtypes2
+                _gkey2 = getattr(_settings, "GEMINI_API_KEY", "")
+                _gmodel2 = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
+                if _gkey2:
+                    _gclient2 = _genai2.Client(api_key=_gkey2)
+                    _gprompt2 = (
+                        "다음은 이탈리아 주방용품 브랜드 코지타벨리니(COSI TABELLINI) 영문 상품명입니다.\n"
+                        "아래 규칙에 따라 한글 상품명으로 변환해주세요:\n\n"
+                        "규칙:\n"
+                        "1. 반드시 '코지타벨리니'로 시작\n"
+                        "2. 영어 제품명은 한글 발음으로 변환 (Orvieto→오르비에토, Convivio→콘비비오, Luisa→루이사, Tosca→토스카, Sirmione→시르미오네, Njord→뇨르드, Velletri→벨레트리, Cane→케인 등)\n"
+                        "3. Small→스몰, Medium→미디움, Large→라지, Big→빅\n"
+                        "4. 제품 유형에 맞는 한글 카테고리 단어 1개 추가:\n"
+                        "   Tray/Platter → 쟁반, Bowl(깊은것) → 대접, Cereal Bowl → 국그릇,\n"
+                        "   Soup/Pasta Bowl → 깊은접시, Mug → 머그컵, Cognac/Brandy Glass → 와인잔,\n"
+                        "   Whisky Glass → 언더락 유리컵, Highball Glass → 유리컵,\n"
+                        "   Dinner Plate → 접시, Salad/Dessert Plate → 접시,\n"
+                        "   Bread Plate → 빵접시, Oval Platter → 타원형 접시,\n"
+                        "   Tea Cup with Saucer → 찻잔 세트, Rest → 수저받침\n"
+                        "5. 끝에 CT 모델번호(예: CT8472) 그대로 추가\n"
+                        "6. 괄호 제거\n\n"
+                        "예시:\n"
+                        "- '코지타벨리니 Orvieto Oval Incised Tray Small (CT8472)' → '코지타벨리니 오르비에토 오벌 트레이 스몰 쟁반 CT8472'\n"
+                        "- '코지타벨리니 Convivio Cereal Bowl (CT15040)' → '코지타벨리니 콘비비오 시리얼 볼 국그릇 CT15040'\n"
+                        "- '코지타벨리니 Tosca Cognac Glass (CT11170)' → '코지타벨리니 토스카 꼬냑 글라스 와인잔 CT11170'\n"
+                        "- '코지타벨리니 Cane Knife/Chopstick Rest Dachshund (CT260010)' → '코지타벨리니 닥스훈트 나이프 젓가락 받침대 수저받침 CT260010'\n\n"
+                        f"상품명: {product.name}\n"
+                        "한글 상품명만 출력 (설명·따옴표 없이):"
+                    )
+                    _gresp2 = _gclient2.models.generate_content(
+                        model=_gmodel2,
+                        contents=[_gtypes2.Part.from_text(text=_gprompt2)],
+                    )
+                    _translated = (_gresp2.text or "").strip().strip('"').strip("'")
+                    if _translated and _translated.startswith("코지타벨리니"):
+                        product.name = _translated
+                        entry.product_name = _translated
+                        log_(f"[{entry.uid[:6]}] 상품명 한글화: {_translated}")
+            except Exception as _ge2:
+                log_(f"[{entry.uid[:6]}] 상품명 한글화 실패 (원본 유지): {_ge2}")
+
         # ── 브랜드 1순위: 네이버 상품정보 페이지 직접 파싱 ──────────────
         # crawler가 __PRELOADED_STATE__ JSON에서 추출한 brand 필드 + 속성 테이블 탐색
         _brand_from_gemini = False
@@ -2080,7 +2132,7 @@ async def _process_entry(
         # brand_locked=True이면 DB 매칭 스킵
         if entry.brand and entry.brand not in ("해당없음", "") and not entry.brand_locked:
             _gemini_key = getattr(_settings, "GEMINI_API_KEY", "")
-            _gemini_model = getattr(_settings, "GEMINI_MODEL", "gemini-2.0-flash")
+            _gemini_model = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
             try:
                 _registrar = _get_registrar()
                 _brand_matched = await asyncio.get_running_loop().run_in_executor(
@@ -2489,7 +2541,10 @@ async def _process_entry(
                 log_(f"[{entry.uid[:6]}] 이미지 가공 실패 (원본 URL 사용): {ie}")
 
         # ── 3. R2 이미지 업로드 ───────────────────────────────────
-        log_(f"[{entry.uid[:6]}] R2 이미지 업로드 시작...")
+        # 재수집 시마다 새 R2 URL 생성 → Wing이 반드시 새 이미지를 가져가도록
+        import uuid as _uuid
+        _run_key = _uuid.uuid4().hex[:8]
+        log_(f"[{entry.uid[:6]}] R2 이미지 업로드 시작... (run_key={_run_key})")
         bundle_image_urls: dict[int, str] = {}
 
         if entry.single_mode:
@@ -2511,8 +2566,9 @@ async def _process_entry(
             for qty in entry.qtys:
                 img_path = composed.get(qty)
                 if img_path and Path(img_path).exists():
+                    _r2_key = f"{product.product_id}_{qty}ea_{_run_key}.jpg"
                     url_result = await loop.run_in_executor(
-                        None, lambda p=img_path: upload_file(p)
+                        None, lambda p=img_path, k=_r2_key: upload_file(p, key=k)
                     )
                     if url_result:
                         bundle_image_urls[qty] = url_result
@@ -2521,37 +2577,21 @@ async def _process_entry(
                         log_(f"[{entry.uid[:6]}] {qty}개 이미지 업로드 실패 → 원본 URL 사용")
                         entry.r2_failed = True
 
-        # 대표이미지 (1개 번들 이미지 or custom 직접 업로드 or 네이버 원본)
+        # 대표이미지: qty=1 이미지가 있으면 사용, 없으면 최소 수량 이미지 사용
         main_img = bundle_image_urls.get(1) or ""
+        if not main_img and bundle_image_urls:
+            _min_qty_key = min(bundle_image_urls.keys())
+            main_img = bundle_image_urls[_min_qty_key]
+            log_(f"[{entry.uid[:6]}] 대표이미지: 최소수량({_min_qty_key}개) 이미지 사용")
         if not main_img:
-            # custom 이미지 설정 시 네이버 원본 절대 사용 안 함 — 배지 다시 합성 시도
             if _custom_img and Path(_custom_img).exists():
-                log_(f"[{entry.uid[:6]}] 배지합성 재시도 (skip_nobg=True) → custom 이미지")
-                try:
-                    _proc2 = ImageProcessor(_settings, store=getattr(entry, "watch_store", "샵케이"))
-                    _composed2 = await loop.run_in_executor(
-                        None,
-                        partial(_proc2.process, _custom_img,
-                                product.product_id, entry.qtys,
-                                skip_nobg=True),
-                    )
-                    for _q, _p in _composed2.items():
-                        if Path(_p).exists():
-                            _u = await loop.run_in_executor(None, lambda p=_p: upload_file(p))
-                            if _u:
-                                bundle_image_urls[_q] = _u
-                    log_(f"[{entry.uid[:6]}] 배지 재합성 완료: {len(_composed2)}개")
-                except Exception as _exc:
-                    log_(f"[{entry.uid[:6]}] 배지 재합성 실패 → 원본 업로드: {_exc}")
-                    _uploaded_custom = await loop.run_in_executor(
-                        None, lambda p=_custom_img: upload_file(p)
-                    )
-                    if _uploaded_custom:
-                        for _q in entry.qtys:
-                            if _q not in bundle_image_urls:
-                                bundle_image_urls[_q] = _uploaded_custom
-                main_img = bundle_image_urls.get(1) or ""
-            elif product.image_url:
+                log_(f"[{entry.uid[:6]}] 대표이미지 fallback: custom 이미지 원본 업로드")
+                _uploaded_custom = await loop.run_in_executor(
+                    None, lambda p=_custom_img: upload_file(p)
+                )
+                if _uploaded_custom:
+                    main_img = _uploaded_custom
+            if not main_img and product.image_url:
                 log_(f"[{entry.uid[:6]}] 원본 이미지 직접 업로드...")
                 _uploaded_main = await loop.run_in_executor(
                     None, lambda: upload_url(product.image_url, f"{product.product_id}_main.jpg")
@@ -2584,8 +2624,9 @@ async def _process_entry(
                     ),
                 )
                 if _det_path and Path(_det_path).exists():
+                    _det_key = f"{product.product_id}_detail_{_run_key}.jpg"
                     _det_up = await loop.run_in_executor(
-                        None, lambda p=_det_path: upload_file(p)
+                        None, lambda p=_det_path, k=_det_key: upload_file(p, key=k)
                     )
                     if _det_up:
                         detail_img_url = _det_up
@@ -2778,7 +2819,11 @@ async def _process_entry(
             def _upload_bytes(data: bytes, fname: str) -> str:
                 """bytes → R2 업로드 → URL 반환 (gemini_writer 에서 호출)."""
                 import os
-                tmp_path = Path(tempfile.gettempdir()) / fname
+                # run_key 추가 → Wing CDN 캐시 우회 (재수집마다 새 URL)
+                _stem = Path(fname).stem
+                _ext  = Path(fname).suffix
+                _unique_fname = f"{_stem}_{_run_key}{_ext}"
+                tmp_path = Path(tempfile.gettempdir()) / _unique_fname
                 try:
                     tmp_path.write_bytes(data)
                     return upload_file(tmp_path) or ""
@@ -2873,7 +2918,7 @@ async def _process_entry(
                 _buf2 = _io2.BytesIO()
                 _txt_img.save(_buf2, format="PNG")
                 _txt_bytes = _buf2.getvalue()
-                _txt_fname = f"{product.product_id}_detail_text.png"
+                _txt_fname = f"{product.product_id}_detail_text_{_run_key}.png"
                 _txt_url = await loop.run_in_executor(
                     None, lambda: _upload_bytes(_txt_bytes, _txt_fname)
                 )
@@ -2920,7 +2965,7 @@ async def _process_entry(
                     _combined.save(_buf, format="PNG", optimize=True)
                     _combined_bytes = _buf.getvalue()
 
-                    _combined_fname = f"{product.product_id}_detail_combined.png"
+                    _combined_fname = f"{product.product_id}_detail_combined_{_run_key}.png"
                     _combined_url = await loop.run_in_executor(
                         None,
                         lambda: _upload_bytes(_combined_bytes, _combined_fname),
@@ -3714,6 +3759,26 @@ _global_timing:        dict = {"item_times": [], "item_start": 0.0}  # 상품별
 _HISTORY_FILE = Path(__file__).parent / "data" / "collection_history.json"
 _MAX_HISTORY  = 20  # 최근 N회 보관
 
+# ── 계정(스토어)별 Wing 엑셀 템플릿 ────────────────────────────────
+# 포트 계정은 2026-07-11부터 "브랜드 ID"(브랜드명 아님) + 모델번호/바코드 컬럼
+# 제거된 신규 스키마를 요구함 (샵케이/제니스트레이딩은 기존 스키마 그대로 통과).
+_PORT_TEMPLATE_PATH = _TMPL_ROOT / "sellertool_upload_포트.xlsm"
+
+
+def _majority_store(entries: list) -> str:
+    """엔트리 목록에서 가장 많이 쓰인 watch_store 반환 (기본값 '샵케이')."""
+    from collections import Counter
+    counts = Counter(getattr(e, "watch_store", "샵케이") or "샵케이" for e in entries)
+    return counts.most_common(1)[0][0] if counts else "샵케이"
+
+
+def _template_for_store(store: str) -> Optional[str]:
+    """계정명 → Wing 엑셀 템플릿 경로. 포트는 전용 템플릿, 그 외는 기존 공용 템플릿."""
+    if store == "포트" and _PORT_TEMPLATE_PATH.exists():
+        return str(_PORT_TEMPLATE_PATH)
+    tmpl = _global_template_path.get("v") or ""
+    return tmpl if tmpl and Path(tmpl).exists() else None
+
 
 def _save_collection_history(
     entries: list[QueueEntry],
@@ -3904,6 +3969,7 @@ def _restore_queue_from_state() -> list[QueueEntry]:
                 extra_detail_images = list(row.get("extra_detail_images") or []),
                 extra_detail_text   = row.get("extra_detail_text", ""),
                 bundle_unit         = int(row.get("bundle_unit") or 0),
+                custom_image_path   = row.get("custom_image_path", ""),
                 status           = _st,
             )
             if e.url:
@@ -4045,9 +4111,9 @@ async def _run_global_processing(margin_rate: float, lead_time: int, use_nobg: b
         # ── 엑셀 생성 ─────────────────────────────────────────────
         success_items = [e.result_item for e in _global_queue if e.result_item]
         if success_items:
-            tmpl = _global_template_path.get("v") or ""
+            tmpl = _template_for_store(_majority_store(_global_queue))
             builder = ExcelBuilder(
-                template_path=tmpl if tmpl and Path(tmpl).exists() else None,
+                template_path=tmpl,
                 output_dir=_OUTPUT_ROOT,
                 category_id="",
             )
@@ -4087,7 +4153,15 @@ async def _run_global_processing(margin_rate: float, lead_time: int, use_nobg: b
                 f"성공: {_done_cnt}개 / 오류: {_error_cnt}개\n"
                 f"엑셀 다운로드 후 Wing에 업로드하세요."
             )
-            _send_notification_with_btn(_notif_msg)
+            try:
+                _notif_loop = asyncio.get_running_loop()
+                _notif_ok = await _notif_loop.run_in_executor(
+                    None, lambda: _send_notification_with_btn(_notif_msg)
+                )
+                if not _notif_ok:
+                    print("[알림] 텔레그램 설정 없음 또는 전송 실패")
+            except Exception as _ne:
+                print(f"[알림] 텔레그램 발송 오류: {_ne}")
         else:
             print("[처리] 완료된 상품이 없습니다 — 오류 로그를 확인하세요.")
 
@@ -4101,9 +4175,9 @@ async def _run_global_processing(margin_rate: float, lead_time: int, use_nobg: b
         _stop_success = [e.result_item for e in _global_queue if e.result_item]
         if _stop_success:
             try:
-                _tmpl_s = _global_template_path.get("v") or ""
+                _tmpl_s = _template_for_store(_majority_store(_global_queue))
                 _builder_s = ExcelBuilder(
-                    template_path=_tmpl_s if _tmpl_s and Path(_tmpl_s).exists() else None,
+                    template_path=_tmpl_s,
                     output_dir=_OUTPUT_ROOT,
                     category_id="",
                 )
@@ -4796,7 +4870,7 @@ def page_monitor() -> None:
                 with ui.row().classes("items-center gap-2 mb-2 flex-wrap"):
                     ui.label("스토어:").classes("text-xs text-slate-500 font-semibold")
                     _mon_store_sel = ui.select(
-                        ["샵케이", "제니스 트레이딩"],
+                        ["샵케이", "제니스 트레이딩", "포트"],
                         value="샵케이",
                     ).props("dense outlined").style("min-width:140px")
                 with ui.row().classes("items-center gap-2 w-full flex-wrap"):
@@ -4816,7 +4890,7 @@ def page_monitor() -> None:
                         added = 0
                         _sel_store = _mon_store_sel.value or "샵케이"
                         for u in urls:
-                            if "smartstore.naver.com" not in u:
+                            if "smartstore.naver.com" not in u and "brand.naver.com" not in u:
                                 ui.notify(f"네이버 스마트스토어 URL이 아닙니다: {u[:50]}", type="warning")
                                 continue
                             _pc.add_watch(u, store=_sel_store)
@@ -5063,7 +5137,7 @@ def page_monitor() -> None:
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
                                             with ui.row().classes("items-center gap-1"):
                                                 _store_val = getattr(w, "store", "샵케이") or "샵케이"
-                                                _store_color = "blue" if _store_val == "샵케이" else "orange"
+                                                _store_color = "blue" if _store_val == "샵케이" else ("orange" if _store_val == "제니스 트레이딩" else "brown")
                                                 ui.badge(_store_val).props(f"color={_store_color}").style("font-size:10px")
                                                 ui.label(w.name or w.url[:60]).classes(
                                                     "text-sm font-semibold text-slate-700 truncate"
@@ -5146,6 +5220,22 @@ def page_monitor() -> None:
             # ━━━ 탭 2: 가격 상승 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             with ui.tab_panel(tab_risen):
                 risen_container = ui.column().classes("w-full gap-2 mt-2")
+                _del_r_uid = [None]
+                with ui.dialog() as _del_r_dlg, ui.card():
+                    ui.label("감시 목록에서 삭제하시겠습니까?").classes("font-semibold mb-2")
+                    with ui.row().classes("gap-2 justify-end"):
+                        def _confirm_del_r():
+                            if _del_r_uid[0]:
+                                _pc.remove_watch(_del_r_uid[0])
+                                _del_r_uid[0] = None
+                            _del_r_dlg.close()
+                            ui.notify("삭제 완료", type="info", timeout=1500)
+                            _refresh_risen()
+                            _cnt = len([x for x in _pc.all_watches() if x.status == "risen"])
+                            tab_risen._props['label'] = f"📈 가격 상승 ({_cnt})" if _cnt else "📈 가격 상승"
+                            tab_risen.update()
+                        ui.button("삭제", on_click=_confirm_del_r).props("color=red dense")
+                        ui.button("취소", on_click=_del_r_dlg.close).props("flat dense")
 
                 def _refresh_risen():
                     risen_container.clear()
@@ -5170,7 +5260,8 @@ def page_monitor() -> None:
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
                                             with ui.row().classes("items-center gap-1"):
                                                 _sv = getattr(w, "store", "샵케이") or "샵케이"
-                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                _sc = "blue" if _sv == "샵케이" else ("orange" if _sv == "제니스 트레이딩" else "brown")
+                                                ui.badge(_sv).props(f"color={_sc}").style("font-size:10px")
                                                 ui.label(w.name or w.url[:60]).classes(
                                                     "text-sm font-semibold text-slate-700 truncate"
                                                 )
@@ -5203,12 +5294,37 @@ def page_monitor() -> None:
                                         ).props("color=teal dense size=sm").tooltip(
                                             "현재가를 새 기준가로 설정 — 다음 체크부터 이 가격 기준"
                                         )
+                                        def _make_del_r(uid=w.uid):
+                                            def _h():
+                                                _del_r_uid[0] = uid
+                                                _del_r_dlg.open()
+                                            return _h
+                                        ui.button(
+                                            icon="delete_outline",
+                                            on_click=_make_del_r(),
+                                        ).props("flat dense size=xs color=red").tooltip("감시 목록에서 삭제")
 
                 _refresh_risen()
 
             # ━━━ 탭 3: 가격 하락 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             with ui.tab_panel(tab_fallen):
                 fallen_container = ui.column().classes("w-full gap-2 mt-2")
+                _del_f_uid = [None]
+                with ui.dialog() as _del_f_dlg, ui.card():
+                    ui.label("감시 목록에서 삭제하시겠습니까?").classes("font-semibold mb-2")
+                    with ui.row().classes("gap-2 justify-end"):
+                        def _confirm_del_f():
+                            if _del_f_uid[0]:
+                                _pc.remove_watch(_del_f_uid[0])
+                                _del_f_uid[0] = None
+                            _del_f_dlg.close()
+                            ui.notify("삭제 완료", type="info", timeout=1500)
+                            _refresh_fallen()
+                            _cnt = len([x for x in _pc.all_watches() if x.status == "fallen"])
+                            tab_fallen._props['label'] = f"📉 가격 하락 ({_cnt})" if _cnt else "📉 가격 하락"
+                            tab_fallen.update()
+                        ui.button("삭제", on_click=_confirm_del_f).props("color=red dense")
+                        ui.button("취소", on_click=_del_f_dlg.close).props("flat dense")
 
                 def _refresh_fallen():
                     fallen_container.clear()
@@ -5233,7 +5349,8 @@ def page_monitor() -> None:
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
                                             with ui.row().classes("items-center gap-1"):
                                                 _sv = getattr(w, "store", "샵케이") or "샵케이"
-                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                _sc = "blue" if _sv == "샵케이" else ("orange" if _sv == "제니스 트레이딩" else "brown")
+                                                ui.badge(_sv).props(f"color={_sc}").style("font-size:10px")
                                                 ui.label(w.name or w.url[:60]).classes(
                                                     "text-sm font-semibold text-slate-700 truncate"
                                                 )
@@ -5266,12 +5383,37 @@ def page_monitor() -> None:
                                         ).props("color=teal dense size=sm").tooltip(
                                             "현재가를 새 기준가로 설정 — 다음 체크부터 이 가격 기준"
                                         )
+                                        def _make_del_f(uid=w.uid):
+                                            def _h():
+                                                _del_f_uid[0] = uid
+                                                _del_f_dlg.open()
+                                            return _h
+                                        ui.button(
+                                            icon="delete_outline",
+                                            on_click=_make_del_f(),
+                                        ).props("flat dense size=xs color=red").tooltip("감시 목록에서 삭제")
 
                 _refresh_fallen()
 
             # ━━━ 탭 4: 품절 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             with ui.tab_panel(tab_sold):
                 sold_container = ui.column().classes("w-full gap-2 mt-2")
+                _del_s_uid = [None]
+                with ui.dialog() as _del_s_dlg, ui.card():
+                    ui.label("감시 목록에서 삭제하시겠습니까?").classes("font-semibold mb-2")
+                    with ui.row().classes("gap-2 justify-end"):
+                        def _confirm_del_s():
+                            if _del_s_uid[0]:
+                                _pc.remove_watch(_del_s_uid[0])
+                                _del_s_uid[0] = None
+                            _del_s_dlg.close()
+                            ui.notify("삭제 완료", type="info", timeout=1500)
+                            _refresh_soldout()
+                            _cnt = len([x for x in _pc.all_watches() if x.status == "soldout"])
+                            tab_sold._props['label'] = f"❌ 품절 ({_cnt})" if _cnt else "❌ 품절"
+                            tab_sold.update()
+                        ui.button("삭제", on_click=_confirm_del_s).props("color=red dense")
+                        ui.button("취소", on_click=_del_s_dlg.close).props("flat dense")
 
                 def _refresh_soldout():
                     sold_container.clear()
@@ -5295,7 +5437,8 @@ def page_monitor() -> None:
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
                                             with ui.row().classes("items-center gap-1"):
                                                 _sv = getattr(w, "store", "샵케이") or "샵케이"
-                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                _sc = "blue" if _sv == "샵케이" else ("orange" if _sv == "제니스 트레이딩" else "brown")
+                                                ui.badge(_sv).props(f"color={_sc}").style("font-size:10px")
                                                 ui.label(w.name or w.url[:60]).classes(
                                                     "text-sm font-semibold text-slate-700 truncate"
                                                 )
@@ -5319,6 +5462,15 @@ def page_monitor() -> None:
                                             "✅ 확인 완료",
                                             on_click=_make_sold_ack(),
                                         ).props("color=teal dense size=sm")
+                                        def _make_del_s(uid=w.uid):
+                                            def _h():
+                                                _del_s_uid[0] = uid
+                                                _del_s_dlg.open()
+                                            return _h
+                                        ui.button(
+                                            icon="delete_outline",
+                                            on_click=_make_del_s(),
+                                        ).props("flat dense size=xs color=red").tooltip("감시 목록에서 삭제")
 
                 _refresh_soldout()
 
@@ -5348,7 +5500,8 @@ def page_monitor() -> None:
                                         with ui.column().classes("flex-1 gap-0 min-w-0"):
                                             with ui.row().classes("items-center gap-1"):
                                                 _sv = getattr(w, "store", "샵케이") or "샵케이"
-                                                ui.badge(_sv).props(f"color={'blue' if _sv == '샵케이' else 'orange'}").style("font-size:10px")
+                                                _sc = "blue" if _sv == "샵케이" else ("orange" if _sv == "제니스 트레이딩" else "brown")
+                                                ui.badge(_sv).props(f"color={_sc}").style("font-size:10px")
                                                 ui.label(w.name or w.url[:60]).classes(
                                                     "text-sm font-semibold text-slate-700 truncate"
                                                 )
@@ -6960,28 +7113,33 @@ def page() -> None:
 
                             _main_store_sel = _main_store_sel()
 
-                            _S_BASE = "border-radius:{r}; font-size:13px; padding:5px 16px; min-width:90px; font-weight:{w}; color:{c}; background:{bg} !important; border:2px solid {bd}; transition:all .15s;"
-                            _S_RED  = _S_BASE.format(r="8px 0 0 8px", w="700", c="#fff", bg="#e53935", bd="#e53935")
-                            _S_BLUE = _S_BASE.format(r="0 8px 8px 0", w="700", c="#fff", bg="#1e88e5", bd="#1e88e5")
-                            _S_OFF1 = _S_BASE.format(r="8px 0 0 8px", w="500", c="#6b7280", bg="#1e1e2e", bd="#374151")
-                            _S_OFF2 = _S_BASE.format(r="0 8px 8px 0", w="500", c="#6b7280", bg="#1e1e2e", bd="#374151")
+                            _S_BASE  = "border-radius:{r}; font-size:13px; padding:5px 16px; min-width:90px; font-weight:{w}; color:{c}; background:{bg} !important; border:2px solid {bd}; transition:all .15s;"
+                            _S_RED   = _S_BASE.format(r="8px 0 0 8px", w="700", c="#fff", bg="#e53935", bd="#e53935")
+                            _S_BLUE  = _S_BASE.format(r="0 0 0 0",     w="700", c="#fff", bg="#1e88e5", bd="#1e88e5")
+                            _S_BROWN = _S_BASE.format(r="0 8px 8px 0", w="700", c="#fff", bg="#795548", bd="#795548")
+                            _S_OFF1  = _S_BASE.format(r="8px 0 0 8px", w="500", c="#6b7280", bg="#1e1e2e", bd="#374151")
+                            _S_OFF2  = _S_BASE.format(r="0 0 0 0",     w="500", c="#6b7280", bg="#1e1e2e", bd="#374151")
+                            _S_OFF3  = _S_BASE.format(r="0 8px 8px 0", w="500", c="#6b7280", bg="#1e1e2e", bd="#374151")
 
                             with ui.row().classes("gap-0 items-center mb-3"):
                                 ui.label("스토어:").classes("text-xs text-slate-400 font-semibold mr-3")
                                 _sb1 = ui.button("샵케이").props("unelevated dense no-caps").style(_S_RED)
                                 _sb2 = ui.button("제니스 트레이딩").props("unelevated dense no-caps").style(_S_OFF2)
+                                _sb3 = ui.button("포트").props("unelevated dense no-caps").style(_S_OFF3)
 
                                 def _sel_store(name):
                                     _main_store_val["v"] = name
+                                    _sb1.style(_S_OFF1); _sb2.style(_S_OFF2); _sb3.style(_S_OFF3)
                                     if name == "샵케이":
                                         _sb1.style(_S_RED)
-                                        _sb2.style(_S_OFF2)
-                                    else:
-                                        _sb1.style(_S_OFF1)
+                                    elif name == "제니스 트레이딩":
                                         _sb2.style(_S_BLUE)
+                                    else:
+                                        _sb3.style(_S_BROWN)
 
                                 _sb1.on_click(lambda: _sel_store("샵케이"))
                                 _sb2.on_click(lambda: _sel_store("제니스 트레이딩"))
+                                _sb3.on_click(lambda: _sel_store("포트"))
 
                             new_url_input = ui.input(
                                 placeholder="https://smartstore.naver.com/.../products/..."
@@ -7012,7 +7170,7 @@ def page() -> None:
 
                                     _fsize = len(content.encode("utf-8"))
                                     urls = _parse_urls_from_text(content)
-                                    naver_urls = [u for u in urls if "smartstore.naver.com" in u]
+                                    naver_urls = [u for u in urls if "smartstore.naver.com" in u or "brand.naver.com" in u]
                                     other_urls  = len(urls) - len(naver_urls)
 
                                     # ── 이전 배치 복원 확인 ───────────────────────────────
@@ -7294,6 +7452,60 @@ def page() -> None:
                             stop_btn.on_click(_on_stop)
                             run_spinner = ui.spinner("dots", size="md", color="blue")
                             run_spinner.set_visibility(False)
+                            with ui.dialog() as _bulk_extra_dlg, ui.card().style("min-width:500px"):
+                                ui.label("📎 전체 추가이미지 일괄 추가").classes("text-base font-bold mb-1")
+                                ui.label("아래 URL들을 모든 항목의 추가이미지로 설정합니다.").classes("text-xs text-slate-500 mb-2")
+                                ui.label("이미지 URL (한 줄에 하나씩)").classes("text-xs font-semibold mb-1")
+                                _bulk_extra_ta = ui.textarea(
+                                    placeholder="https://...\nhttps://...",
+                                ).props("dense outlined rows=5").style("width:100%; font-size:11px")
+                                ui.separator().classes("my-2")
+                                ui.label("파일 업로드 (여러 장 가능)").classes("text-xs font-semibold mb-1")
+                                async def _bulk_file_upload(ev):
+                                    try:
+                                        if hasattr(ev, "file") and ev.file is not None:
+                                            _fb = await ev.file.read()
+                                            _fname_orig = getattr(ev.file, "name", "") or getattr(ev, "name", "img.jpg")
+                                        else:
+                                            _fb = ev.content.read()
+                                            _fname_orig = getattr(ev, "name", "img.jpg")
+                                        _ext = (_fname_orig.rsplit(".", 1)[-1] or "jpg").lower()
+                                        _mime = "image/png" if _ext == "png" else "image/webp" if _ext == "webp" else "image/jpeg"
+                                        import time as _t2
+                                        _fname2 = f"bulk_extra_{int(_t2.time()*1000)}.{_ext}"
+                                        import asyncio as _aio3
+                                        _loop3 = _aio3.get_running_loop()
+                                        from modules.image_uploader import _do_upload as _r3up
+                                        _up_url = await _loop3.run_in_executor(
+                                            None, lambda: _r3up(_fb, _fname2, _mime)
+                                        )
+                                        if _up_url:
+                                            _cur = (_bulk_extra_ta.value or "").strip()
+                                            _bulk_extra_ta.set_value((_cur + "\n" + _up_url).strip())
+                                            ui.notify("업로드 완료", type="positive", timeout=2000)
+                                        else:
+                                            ui.notify("업로드 실패", type="negative")
+                                    except Exception as _ue:
+                                        ui.notify(f"업로드 오류: {_ue}", type="negative")
+                                ui.upload(
+                                    label="📁 파일 선택 (jpg/png/webp)",
+                                    on_upload=_bulk_file_upload,
+                                    auto_upload=True,
+                                    multiple=True,
+                                ).props("accept=.jpg,.jpeg,.png,.webp flat dense color=teal")
+                                with ui.row().classes("gap-2 justify-end mt-3 w-full"):
+                                    ui.button("취소", on_click=_bulk_extra_dlg.close).props("flat dense")
+                                    def _bulk_extra_save():
+                                        urls = [u.strip() for u in (_bulk_extra_ta.value or "").splitlines() if u.strip().startswith("http")]
+                                        for _e in queue:
+                                            _e.extra_detail_images = list(urls)
+                                        _bulk_extra_dlg.close()
+                                        ui.notify(f"전체 {len(queue)}개 항목에 추가이미지 {len(urls)}건 적용됨", type="positive", timeout=3000)
+                                        _render_queue()
+                                    ui.button("전체 적용", on_click=_bulk_extra_save).props("color=teal dense")
+                            ui.button("📎 전체 추가이미지", icon="add_photo_alternate",
+                                on_click=_bulk_extra_dlg.open,
+                            ).props("color=teal outline size=md")
                             progress_lbl = ui.label("").classes("text-sm text-slate-400 flex-1")
                             error_nav_row = ui.row().classes("gap-1 items-center")
                             error_nav_row.set_visibility(False)
@@ -7377,9 +7589,9 @@ def page() -> None:
                                 dl_btn.set_enabled(False)
                                 dl_btn.set_text("⏳ 생성 중...")
                                 try:
-                                    tmpl = _template_path.get("v", "")
+                                    tmpl = _template_for_store(_majority_store(_done_entries))
                                     builder = ExcelBuilder(
-                                        template_path=tmpl or None,
+                                        template_path=tmpl,
                                         output_dir=str(_OUTPUT_ROOT),
                                     )
                                     _loop = asyncio.get_running_loop()
@@ -7581,6 +7793,17 @@ def page() -> None:
                                     placeholder="새 브랜드명"
                                 ).props("dense outlined clearable").style("min-width:160px")
 
+                            # ── 상품명 찾기/바꾸기 행 ─────────────────────────
+                            with ui.row().classes("items-end gap-2 flex-wrap mb-2"):
+                                ui.label("상품명").classes("text-xs text-slate-500 self-center font-semibold").style("min-width:44px")
+                                _bulk_name_find = ui.input(
+                                    placeholder="찾을 텍스트 (예: [그로헤 코리아])"
+                                ).props("dense outlined clearable").style("min-width:200px")
+                                ui.icon("arrow_forward").classes("text-slate-400 self-center")
+                                _bulk_name_replace = ui.input(
+                                    placeholder="바꿀 텍스트 (빈칸=삭제)"
+                                ).props("dense outlined clearable").style("min-width:160px")
+
                             # ── 카테고리 행 ────────────────────────────────
                             _bulk_cat_opts = {"opts": _get_queue_cat_options()}
                             _bulk_new_cat  = {"id": "", "name": ""}
@@ -7641,9 +7864,11 @@ def page() -> None:
                                     old_cid  = _bulk_cat_opts["opts"].get(old_c_lbl, "")
                                     new_cid  = _bulk_new_cat["id"]
                                     new_cname= _bulk_new_cat["name"]
+                                    find_txt = (_bulk_name_find.value or "").strip()
+                                    repl_txt = (_bulk_name_replace.value or "").strip()
 
-                                    if not new_b and not new_cid:
-                                        ui.notify("새 브랜드명 또는 카테고리를 선택하세요", type="warning")
+                                    if not new_b and not new_cid and not find_txt:
+                                        ui.notify("새 브랜드명 · 카테고리 · 상품명 찾을 텍스트 중 하나를 입력하세요", type="warning")
                                         return
                                     if not _global_queue:
                                         ui.notify("큐가 비어있습니다", type="warning")
@@ -7668,18 +7893,27 @@ def page() -> None:
                                             elif old_cid and not c_match:
                                                 continue
 
+                                        changed = False
                                         if new_b:
                                             _e.brand = new_b
                                             _e.brand_locked = True
                                             if _e.result_item:
                                                 _e.result_item.brand = new_b
                                                 _e.result_item.manufacturer = new_b
+                                            changed = True
                                         if new_cid:
                                             _e.category_id = new_cid
                                             _e.category_is_manual = True
                                             if _e.result_item:
                                                 _e.result_item.category_id = new_cid
-                                        cnt += 1
+                                            changed = True
+                                        if find_txt and find_txt in (_e.product_name or ""):
+                                            _e.product_name = _e.product_name.replace(find_txt, repl_txt)
+                                            if _e.result_item:
+                                                _e.result_item.product_name = (_e.result_item.product_name or "").replace(find_txt, repl_txt)
+                                            changed = True
+                                        if changed:
+                                            cnt += 1
 
                                     if new_b:
                                         _bmap = _load_brand_map()
@@ -7691,12 +7925,15 @@ def page() -> None:
                                     if num_str: parts.append(f"번호: {num_str}")
                                     if new_b:   parts.append(f"브랜드 → {new_b}")
                                     if new_cname: parts.append(f"카테고리 → {new_cname.split(' > ')[-1]}")
+                                    if find_txt: parts.append(f"상품명 '{find_txt}' → '{repl_txt or '삭제'}'")
                                     ui.notify(" | ".join(parts), type="positive", timeout=4000)
 
                                     _bulk_num_inp.set_value("")
                                     _bulk_new_brand.set_value("")
                                     _bulk_new_cat["id"] = ""
                                     _bulk_new_cat["name"] = ""
+                                    _bulk_name_find.set_value("")
+                                    _bulk_name_replace.set_value("")
                                     _render_queue()
 
                                 ui.button("일괄변경 적용", icon="check", on_click=_apply_bulk_change).props("color=primary size=sm")
@@ -8565,6 +8802,19 @@ def page() -> None:
                                 "font-size:13px; font-weight:600; padding:4px 12px"
                             ).tooltip("상세페이지 하단 추가 이미지/텍스트 설정")
 
+                            if _has_extra:
+                                def _make_clear_extra_handler(e_ref=entry):
+                                    def _h():
+                                        e_ref.extra_detail_images = []
+                                        e_ref.extra_detail_text = ""
+                                        ui.notify("추가자료 전체 삭제됨", type="positive", timeout=2000)
+                                        _render_queue()
+                                    return _h
+                                ui.button(
+                                    icon="close",
+                                    on_click=_make_clear_extra_handler(),
+                                ).props("flat dense round size=sm color=red").tooltip("추가자료 전체 삭제")
+
                             # ── 대표이미지 수정 버튼 (클릭 → Ctrl+V 즉시 저장) ──────
                             def _make_rep_img_handler(e_ref=entry):
                                 async def _h():
@@ -8690,6 +8940,7 @@ def page() -> None:
                                     def _make_clear_img_handler(e_ref=entry):
                                         def _clear():
                                             e_ref.custom_image_path = ""
+                                            _persist_queue()
                                             ui.notify("대표이미지 초기화 — 재수집 시 네이버 원본 사용", type="info", timeout=2000)
                                             _render_queue()
                                         return _clear
@@ -8697,6 +8948,13 @@ def page() -> None:
                                         "✕",
                                         on_click=_make_clear_img_handler(),
                                     ).props("flat dense size=xs color=red").tooltip("대표이미지 초기화 (네이버 원본으로 재수집)")
+                                    # ── 미리보기 썸네일 ───────────────────────────
+                                    _cimg_path = getattr(entry, "custom_image_path", "")
+                                    ui.image(_cimg_path).style(
+                                        "width:42px; height:42px; object-fit:cover; "
+                                        "border-radius:5px; border:2px solid #60a5fa; "
+                                        "margin-left:6px; flex-shrink:0;"
+                                    ).tooltip("설정된 대표이미지 미리보기")
 
                             # ── 관부가세 추가 버튼 ──────────────────────────
                             def _make_customs_handler(e_ref=entry):
@@ -9743,8 +10001,8 @@ def page() -> None:
         if not (url.startswith("http://") or url.startswith("https://")):
             ui.notify(f"올바른 URL이 아닙니다 (https://... 형식으로 입력)", type="warning")
             return
-        if "smartstore.naver.com" not in url:
-            ui.notify("네이버 SmartStore URL만 지원합니다 (smartstore.naver.com)", type="warning")
+        if "smartstore.naver.com" not in url and "brand.naver.com" not in url:
+            ui.notify("네이버 SmartStore / 브랜드스토어 URL만 지원합니다", type="warning")
             return
         if _is_duplicate_url(url, queue):
             ui.notify("이미 추가된 URL입니다 (같은 상품 ID).", type="warning")
@@ -9784,7 +10042,7 @@ def page() -> None:
         new_url_input.set_value("")
         new_brand_input.set_value("")
         _render_queue()
-        asyncio.ensure_future(ui.run_javascript(_DING_JS))
+        ui.run_javascript(_DING_JS)
         ui.notify(f"추가됨: {url[:50]}...", type="positive", timeout=2000)
 
     def _remove_entry(uid: str):
@@ -10144,8 +10402,8 @@ async def _on_startup():
         _cleanup_output(24)   # 시작 시 1회 즉시 청소
     asyncio.get_running_loop().run_in_executor(None, _check)
 
-    # ── 가격 모니터링 스케줄러 시작 ─────────────────────────────
-    asyncio.create_task(_pc.run_scheduler())
+    # ── 가격 모니터링 스케줄러 — 서버 IP 차단으로 비활성화 (로컬 PC가 체크)
+    # asyncio.create_task(_pc.run_scheduler())
 
     # ── output 폴더 주기적 청소 (24시간마다) ────────────────────
     async def _periodic_cleanup():
@@ -10628,6 +10886,56 @@ def page_price_fix() -> None:
                 ).props('accept=".xlsx" flat bordered').classes("w-full")
 
         dl_row  # 다운로드 버튼 자리
+
+
+def _check_local_token(request: _FastAPIRequest) -> bool:
+    """로컬 PC API 토큰 검증."""
+    import json as _json
+    try:
+        cfg = _json.loads((Path("data/config.json")).read_text(encoding="utf-8"))
+        token = cfg.get("local_api_token", "")
+    except Exception:
+        token = ""
+    return bool(token) and request.headers.get("X-API-Token", "") == token
+
+
+@_app.get("/api/watchlist")
+def _api_watchlist(request: _FastAPIRequest):
+    """로컬 PC 가격체크 스크립트용 watchlist 반환."""
+    if not _check_local_token(request):
+        return {"error": "unauthorized"}
+    from modules import price_checker as _pc
+    return _pc.get_watchlist_for_export()
+
+
+@_app.post("/api/price-report")
+async def _api_price_report(request: _FastAPIRequest):
+    """로컬 PC 가격체크 결과 수신 → price_watch.json 업데이트 + 텔레그램 발송."""
+    if not _check_local_token(request):
+        return {"error": "unauthorized"}
+    from modules import price_checker as _pc
+    try:
+        body = await request.json()
+        results = body if isinstance(body, list) else []
+        stats = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: _pc.process_price_report(results)
+        )
+        return {"ok": True, "stats": stats}
+    except Exception as _e:
+        print(f"[API] /api/price-report 오류: {_e}")
+        return {"error": str(_e)}
+
+
+@_app.get("/api/queue-status")
+def _api_queue_status():
+    """수집 상태 확인용 API — 배포 전 Claude가 이 엔드포인트를 먼저 확인해야 함."""
+    return {
+        "running": bool(_global_running.get("v", False)),
+        "queue_size": len(_global_queue),
+        "pending": sum(1 for e in _global_queue if e.status == "pending"),
+        "processing": sum(1 for e in _global_queue if e.status == "processing"),
+        "done": sum(1 for e in _global_queue if e.status == "done"),
+    }
 
 
 @_app.on_shutdown
