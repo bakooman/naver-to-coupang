@@ -50,6 +50,7 @@ class BulkItem:
     naver_url:          str
     product_name:       str
     brand:              str
+    brand_id:           str = ""   # 쿠팡 등록 브랜드ID (KR-XXXXX) — 없으면 "브랜드 없음" 기입
     category_id:        str = ""
     bundles:            list[Bundle] = field(default_factory=list)
     main_image_url:     str = ""
@@ -144,9 +145,11 @@ class ExcelBuilder:
         "상품고시정보 카테고리": "_gosisi_cat",
         "카테고리":              "category_id",
         "등록상품명":            "product_name",
-        # 포트 계정 신규 템플릿은 컬럼명이 "브랜드 ID"로 바뀌었지만, Wing이 브랜드명
-        # 텍스트를 그대로 받아 내부적으로 매칭함 (기존 "브랜드" 컬럼과 동일하게 처리)
-        "브랜드 ID":             "brand",
+        # ⚠️ "브랜드 ID"를 "브랜드" 앞에 배치 (substring 충돌 방지)
+        # Wing 대량등록 엑셀 업로드는 브랜드명 텍스트를 받지 않고 등록된 브랜드 ID
+        # 코드(예: KR-45509) 또는 "브랜드 없음"만 허용함 — 실사용 업로드 테스트로 확인됨
+        # (개별 상품등록 화면에서 브랜드명이 통과된 것처럼 보였던 것과는 다른 검증 경로).
+        "브랜드 ID":             "brand_id",
         "브랜드":                "brand",
         "제조사":                "manufacturer",
         "모델번호":              "model_number",
@@ -362,6 +365,9 @@ class ExcelBuilder:
         w("category_id",  cat_id)
         w("product_name", item.product_name)
         w("brand",        item.brand)
+        # "브랜드 ID" 컬럼: 등록된 브랜드ID(KR-XXXXX) 있으면 그거, 없으면 "브랜드 없음"
+        # (Wing 대량등록은 이 컬럼에 브랜드명 텍스트를 받지 않음 — 실사용 테스트로 확인됨)
+        w("brand_id", item.brand_id or "브랜드 없음")
         w("manufacturer", mfr)
         w("model_number", item.model_number)
 

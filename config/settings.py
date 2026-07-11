@@ -29,6 +29,11 @@ class Settings:
     COUPANG_SECRET_KEY = os.getenv("COUPANG_SECRET_KEY", "")
     COUPANG_VENDOR_ID  = os.getenv("COUPANG_VENDOR_ID", "")
 
+    # ── 쿠팡 API (포트 계정, 브랜드ID 자동조회용) ──────────
+    COUPANG_ACCESS_KEY_PORT = os.getenv("COUPANG_ACCESS_KEY_PORT", "")
+    COUPANG_SECRET_KEY_PORT = os.getenv("COUPANG_SECRET_KEY_PORT", "")
+    COUPANG_VENDOR_ID_PORT  = os.getenv("COUPANG_VENDOR_ID_PORT", "")
+
     # ── 쿠팡 판매자 계정 정보 ────────────────────────────
     VENDOR_USER_ID               = os.getenv("VENDOR_USER_ID", "")
     OUTBOUND_SHIPPING_PLACE_CODE = int(os.getenv("OUTBOUND_SHIPPING_PLACE_CODE", "0") or 0)

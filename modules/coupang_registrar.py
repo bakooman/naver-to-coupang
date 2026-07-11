@@ -1046,6 +1046,56 @@ class CoupangRegistrar:
             print(f"[Coupang] 브랜드 검색 실패 (keyword={keyword}): {e}")
             return []
 
+    _enrolled_brands_cache: Optional[list[dict]] = None
+
+    def get_enrolled_brands(self, force_refresh: bool = False) -> list[dict]:
+        """
+        판매자가 Wing "브랜드 관리"에 등록해둔 브랜드 전체 조회 (인스턴스 캐시).
+
+        API: GET /v2/providers/seller_api/apis/api/v1/marketplace/brands/enrolled
+        반환: [{"brandId": "KR-5", "brandName": "NIKE"}, ...]
+        """
+        if self._enrolled_brands_cache is not None and not force_refresh:
+            return self._enrolled_brands_cache
+
+        try:
+            data = self._get("/v2/providers/seller_api/apis/api/v1/marketplace/brands/enrolled")
+            raw_list = data.get("data") or []
+
+            results = []
+            for item in raw_list:
+                if not isinstance(item, dict):
+                    continue
+                bid   = item.get("brandId")
+                bname = item.get("brandName")
+                if bid and bname:
+                    results.append({"brandId": str(bid), "brandName": str(bname)})
+            self._enrolled_brands_cache = results
+            return results
+        except Exception as e:
+            print(f"[Coupang] 등록 브랜드 목록 조회 실패: {e}")
+            return []
+
+    def resolve_brand_id(self, brand_name: str, brand_alt: str = "") -> str:
+        """
+        브랜드명 → Wing에 등록된 브랜드ID(KR-XXXXX). 매칭 실패 시 빈 문자열
+        (엑셀 빌더가 빈 문자열이면 "브랜드 없음"으로 대체 기입함).
+        """
+        if not brand_name or brand_name in ("해당없음", ""):
+            return ""
+
+        enrolled = self.get_enrolled_brands()
+        if not enrolled:
+            return ""
+
+        for cand_name in (brand_name, brand_alt):
+            if not cand_name:
+                continue
+            for b in enrolled:
+                if self._brand_names_match(cand_name, b["brandName"]):
+                    return b["brandId"]
+        return ""
+
     def resolve_brand(
         self,
         naver_brand: str,

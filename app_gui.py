@@ -282,10 +282,29 @@ _app.add_middleware(_AuthMiddleware)
 
 _settings = Settings()
 
-_registrar_instance: Optional[CoupangRegistrar] = None
+_registrar_instance:      Optional[CoupangRegistrar] = None
+_registrar_instance_port: Optional[CoupangRegistrar] = None
 
-def _get_registrar() -> CoupangRegistrar:
-    global _registrar_instance
+
+class _PortSettingsProxy:
+    """Settings 프록시 — 쿠팡 API 키만 포트 계정 전용 값으로 오버라이드."""
+    def __getattr__(self, name):
+        if name == "COUPANG_ACCESS_KEY":
+            return _settings.COUPANG_ACCESS_KEY_PORT
+        if name == "COUPANG_SECRET_KEY":
+            return _settings.COUPANG_SECRET_KEY_PORT
+        if name == "COUPANG_VENDOR_ID":
+            return _settings.COUPANG_VENDOR_ID_PORT
+        return getattr(_settings, name)
+
+
+def _get_registrar(store: str = "") -> CoupangRegistrar:
+    """계정별 CoupangRegistrar 인스턴스. 포트는 전용 API 키 사용."""
+    global _registrar_instance, _registrar_instance_port
+    if store == "포트":
+        if _registrar_instance_port is None:
+            _registrar_instance_port = CoupangRegistrar(_PortSettingsProxy())
+        return _registrar_instance_port
     if _registrar_instance is None:
         _registrar_instance = CoupangRegistrar(_settings)
     return _registrar_instance
@@ -389,6 +408,7 @@ class QueueEntry:
     category_is_manual: bool = False     # True = 사용자가 직접 입력/선택 → 재처리 시 덮어쓰기 금지
     qty_locked:        bool = False       # True = 사용자가 수동으로 수량 지정 → L 자동계산 스킵
     brand_locked:      bool = False       # True = 사용자가 직접 브랜드 입력 → 처리 중 덮어쓰기 금지
+    brand_id:          str  = ""          # 쿠팡 등록 브랜드ID (KR-XXXXX) — resolve_brand_id() 결과
     min_qty:           int  = 1           # 최솟값 (기본 1개, 수정 가능)
     draft:             bool = False       # True = Wing 임시저장 (판매시작일 공란 → 상세페이지 직접 수정)
     use_nobg:          bool = False       # 항목별 누끼 설정 (파일 업로드 시점에 저장)
@@ -2150,6 +2170,22 @@ async def _process_entry(
             except Exception as _be:
                 log_(f"[{entry.uid[:6]}] 브랜드 쿠팡DB 매칭 실패(무시): {_be}")
 
+        # ── 브랜드ID(KR-XXXXX) 조회 — Wing 엑셀 "브랜드 ID" 컬럼용 ──────────
+        # 계정별 등록 브랜드 목록에서 매칭. 실패 시 excel_builder가 "브랜드 없음"으로 대체.
+        if entry.brand and entry.brand not in ("해당없음", ""):
+            try:
+                _registrar_bid = _get_registrar(entry.watch_store)
+                entry.brand_id = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda b=entry.brand, ba=_brand_alt: _registrar_bid.resolve_brand_id(b, brand_alt=ba),
+                )
+                if entry.brand_id:
+                    log_(f"[{entry.uid[:6]}] 브랜드ID 매칭: '{entry.brand}' → '{entry.brand_id}'")
+                else:
+                    log_(f"[{entry.uid[:6]}] 브랜드ID 매칭 실패 — '브랜드 없음'으로 기입됨")
+            except Exception as _bie:
+                log_(f"[{entry.uid[:6]}] 브랜드ID 조회 오류(무시): {_bie}")
+
         # ── 1-a. 카테고리 감지: Gemini 1순위 → 키워드 사전 2순위 → 네이버카테고리 3순위 ──
         detector = _get_detector()
 
@@ -3684,6 +3720,7 @@ async def _process_entry(
             naver_url=entry.url,
             product_name=product_name_50,
             brand=entry.brand,
+            brand_id=entry.brand_id,
             category_id=entry.category_id,    # 자동감지 or 수동입력 카테고리 ID
             bundles=bundles,
             main_image_url=main_img,
