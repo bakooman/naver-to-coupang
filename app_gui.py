@@ -3815,8 +3815,8 @@ def _majority_store(entries: list) -> str:
 
 
 def _template_for_store(store: str) -> Optional[str]:
-    """Wing 엑셀 템플릿 경로. 전 계정(샵케이/제니스트레이딩/포트) 통합 템플릿 사용."""
-    if _PORT_TEMPLATE_PATH.exists():
+    """계정명 → Wing 엑셀 템플릿 경로. 포트는 전용 템플릿, 그 외는 기존 공용 템플릿."""
+    if store == "포트" and _PORT_TEMPLATE_PATH.exists():
         return str(_PORT_TEMPLATE_PATH)
     tmpl = _global_template_path.get("v") or ""
     return tmpl if tmpl and Path(tmpl).exists() else None
