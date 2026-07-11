@@ -2171,13 +2171,18 @@ async def _process_entry(
                 log_(f"[{entry.uid[:6]}] 브랜드 쿠팡DB 매칭 실패(무시): {_be}")
 
         # ── 브랜드ID(KR-XXXXX) 조회 — Wing 엑셀 "브랜드 ID" 컬럼용 ──────────
-        # 계정별 등록 브랜드 목록에서 매칭. 실패 시 excel_builder가 "브랜드 없음"으로 대체.
+        # 쿠팡 카탈로그 검색 + 텍스트매칭 → 실패 시 Gemini 재판별 → 그래도 실패면
+        # excel_builder가 "브랜드 없음"으로 대체.
         if entry.brand and entry.brand not in ("해당없음", ""):
             try:
                 _registrar_bid = _get_registrar(entry.watch_store)
+                _gk_bid = getattr(_settings, "GEMINI_API_KEY", "")
+                _gm_bid = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
                 entry.brand_id = await asyncio.get_running_loop().run_in_executor(
                     None,
-                    lambda b=entry.brand, ba=_brand_alt: _registrar_bid.resolve_brand_id(b, brand_alt=ba),
+                    lambda b=entry.brand, ba=_brand_alt: _registrar_bid.resolve_brand_id(
+                        b, brand_alt=ba, gemini_api_key=_gk_bid, gemini_model=_gm_bid,
+                    ),
                 )
                 if entry.brand_id:
                     log_(f"[{entry.uid[:6]}] 브랜드ID 매칭: '{entry.brand}' → '{entry.brand_id}'")

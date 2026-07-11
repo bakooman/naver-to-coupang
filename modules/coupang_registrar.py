@@ -1077,25 +1077,51 @@ class CoupangRegistrar:
             print(f"[Coupang] 등록 브랜드 목록 조회 실패: {e}")
             return []
 
-    def resolve_brand_id(self, brand_name: str, brand_alt: str = "") -> str:
+    def resolve_brand_id(
+        self,
+        brand_name: str,
+        brand_alt: str = "",
+        gemini_api_key: str = "",
+        gemini_model: str = "gemini-2.5-flash",
+    ) -> str:
         """
         브랜드명 → 쿠팡 브랜드ID(KR-XXXXX). 매칭 실패 시 빈 문자열
-        (엑셀 빌더가 빈 문자열이면 "브랜드 없음"으로 대체 기입함).
+        (엑셀 빌더가 빈 문자열이면 "브랜드 없음"으로 대체 기입함 — 검색 노출에
+        불리하므로 아래 단계들을 다 거쳐도 실패했을 때만의 최후 수단).
 
-        쿠팡 전체 브랜드 카탈로그 검색(search_brands) 하나로 처리 — "내 브랜드에
-        추가" 여부와 무관하게 검색만으로 유효한 brandId가 나오는 것으로 확인됨.
+        1순위) 쿠팡 전체 브랜드 카탈로그 검색(search_brands) + 텍스트 유사도 매칭
+               ("내 브랜드에 추가" 여부와 무관하게 검색만으로 유효한 brandId 확인됨)
+        2순위) 텍스트 매칭 실패해도 후보가 있으면 Gemini로 재판별
+               (예: "카스트롤" 검색 → 공식표기 "캐스트롤" 후보를 Gemini가 동일
+               브랜드로 인식 → 텍스트 매칭만으론 놓치는 표기 차이 커버)
         """
         if not brand_name or brand_name in ("해당없음", ""):
             return ""
 
-        for cand_name in (brand_name, brand_alt):
-            if not cand_name:
-                continue
+        candidate_names = [n for n in (brand_name, brand_alt) if n]
+        all_candidates: list[dict] = []
+
+        for cand_name in candidate_names:
             if cand_name not in self._brand_search_cache:
                 self._brand_search_cache[cand_name] = self.search_brands(cand_name)
-            for c in self._brand_search_cache[cand_name]:
+            found = self._brand_search_cache[cand_name]
+            all_candidates.extend(found)
+            for c in found:
                 if self._brand_names_match(cand_name, c["brandName"]):
                     return c["brandId"]
+
+        if all_candidates and gemini_api_key:
+            from modules.gemini_writer import match_brand_with_gemini
+            g_matched = match_brand_with_gemini(
+                naver_brand=brand_name,
+                coupang_candidates=all_candidates,
+                api_key=gemini_api_key,
+                model=gemini_model,
+            )
+            if g_matched:
+                print(f"[Brand] Gemini 재판별로 브랜드ID 확정: '{brand_name}' → "
+                      f"'{g_matched['brandName']}' ({g_matched['brandId']})")
+                return g_matched["brandId"]
 
         return ""
 
