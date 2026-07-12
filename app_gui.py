@@ -3439,12 +3439,14 @@ async def _process_entry(
                 extra_options = [(t, v) for t, v in extra_options if t not in _fixed_opts]
                 log_(f"[{entry.uid[:6]}] ⚠ 고정값 옵션 제거 (Wing 중복 방지): {_fixed_opts}")
 
-        # 상품명에서 모델번호 패턴 추출 (예: KG79, KG521, WMF-100, 05100-00461 등)
+        # 상품명에서 모델번호 패턴 추출 (예: KG79, KG521, WMF-100, 05100-00461,
+        # 97133-G6000 등)
         # (?<!\d): 앞에 숫자가 있으면 매칭 안 함 — "0W-20" 같은 SAE 점도 표기에서
         # "W-20"만 잘못 추출되는 것 방지(엔진오일 GTIN/MPN 형식 오류 원인이었음)
-        # \d{4,6}-\d{3,6}: 부품번호 형식(예: 현대모비스 05100-00461) 추가 지원
+        # \d{4,6}-[A-Z0-9]{3,7}: 부품번호 형식(현대모비스 05100-00461, 97133-G6000
+        # 등 숫자-숫자/숫자-영숫자 혼합) 지원 — 하이픈 뒤 일부만 잘리는 것 방지
         _model_match = _re.search(
-            r'(?<!\d)[A-Z]{1,4}-?\d{2,6}[A-Z0-9]*|\d{4,6}-\d{3,6}', product.name
+            r'(?<!\d)[A-Z]{1,4}-?\d{2,6}[A-Z0-9]*|\d{4,6}-[A-Z0-9]{3,7}', product.name
         )
         _extracted_model = _model_match.group(0) if _model_match else ""
 
