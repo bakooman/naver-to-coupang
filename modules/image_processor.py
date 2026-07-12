@@ -293,8 +293,9 @@ class ImageProcessor:
         좌측 하단 원형 배지 + 수량 텍스트.
 
         스타일:
-          샵케이        : 흰색 채움 + 검정 테두리 + 검정 글씨 (기존)
-          제니스 트레이딩: 검정 채움 (테두리 없음) + 흰색 글씨
+          샵케이        : 흰색 채움 + 검정 테두리 + 검정 글씨 (기존, 원형)
+          제니스 트레이딩: 검정 채움 (테두리 없음) + 흰색 글씨 (원형)
+          포트          : 흰색 채움 + 검정 테두리 + 검정 글씨 (모서리 둥근 사각형)
 
         크기 기준 (800×800 캔버스):
           원 지름  ≈ 152 px  (캔버스 단변의 19%)
@@ -305,14 +306,19 @@ class ImageProcessor:
         W, H  = image.size
         text  = f"{qty}개"
 
-        # ── 원 크기·위치 ────────────────────────────────────────
+        # ── 배지 크기·위치 ──────────────────────────────────────
         d      = int(min(W, H) * 0.194)  # 0.215 → 0.194 (10% 축소)
         margin = int(min(W, H) * 0.028)
-        cx     = margin + d // 2
-        cy     = H - margin - d // 2
 
         # ── 스토어별 배지 스타일 ─────────────────────────────────
-        _is_zenith = (getattr(self, "store", "샵케이") == "제니스 트레이딩")
+        _store     = getattr(self, "store", "샵케이")
+        _is_zenith = (_store == "제니스 트레이딩")
+        _is_port   = (_store == "포트")
+
+        # 포트: 원이 아닌 모서리 둥근 사각형 → 가로폭을 세로보다 넓게
+        rw = int(d * 1.2) if _is_port else d
+        cx = margin + rw // 2
+        cy = H - margin - d // 2
 
         if _is_zenith:
             # 검정 채움 원, 테두리 없음
@@ -324,6 +330,20 @@ class ImageProcessor:
             text_color   = (255, 255, 255)
             stroke_fill  = (255, 255, 255)  # 흰 stroke → 흰 텍스트 두껍게
             stroke_width = 5
+        elif _is_port:
+            # 흰색 채움 + 검정 테두리, 모서리 둥근 사각형
+            border_w = max(2, int(d * 0.026))
+            draw.rounded_rectangle(
+                [cx - rw // 2, cy - d // 2,
+                 cx + rw // 2, cy + d // 2],
+                radius=int(d * 0.28),
+                fill=(255, 255, 255),
+                outline=(0, 0, 0),
+                width=border_w,
+            )
+            text_color   = (0, 0, 0)
+            stroke_fill  = (0, 0, 0)
+            stroke_width = 2
         else:
             # 흰색 채움 + 검정 테두리 (기존 샵케이 스타일)
             border_w = max(2, int(d * 0.026))
