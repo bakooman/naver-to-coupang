@@ -25,6 +25,71 @@ _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 ]
 
+# ── 상품 성격에 맞춘 디자인 스타일 프리셋 ────────────────────────────
+# 폰트체·포인트컬러를 스타일별로 다르게 줘서 모든 상품이 같은 느낌으로
+# 나오는 것을 방지. 본문/부제는 가독성 우선으로 무채색 유지, 타이틀·포인트
+# 요소에만 스타일 컬러/폰트를 적용해 "오타 0%/절대 안 잘림" 안전장치는 유지.
+_STYLE_PRESETS: dict[str, dict] = {
+    "premium": {   # 고급스러운 느낌 — 명조체(세리프) + 골드
+        "title_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumMyeongjoBold.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf",
+            "C:/Windows/Fonts/batang.ttc",
+            "C:/Windows/Fonts/malgunbd.ttf",
+        ],
+        "body_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+        ],
+        "accent": (198, 161, 91),      # 골드
+    },
+    "modern": {    # 모던·심플 — 나눔스퀘어라운드 + 블루
+        "title_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumSquareRoundB.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumSquareB.ttf",
+            "C:/Windows/Fonts/malgunbd.ttf",
+        ],
+        "body_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumSquareRoundR.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+        ],
+        "accent": (37, 99, 235),       # 블루
+    },
+    "playful": {   # 발랄·귀여움 — 나눔스퀘어 Bold + 코랄
+        "title_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumSquareB.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumSquareRoundB.ttf",
+            "C:/Windows/Fonts/malgunbd.ttf",
+        ],
+        "body_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+        ],
+        "accent": (249, 115, 22),      # 코랄/오렌지
+    },
+    "tech": {      # 테크·파워풀 — 굵은 고딕 + 레드
+        "title_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothicBold.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+            "C:/Windows/Fonts/malgunbd.ttf",
+        ],
+        "body_fonts": [
+            "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "C:/Windows/Fonts/malgun.ttf",
+        ],
+        "accent": (220, 38, 38),       # 레드
+    },
+}
+_DEFAULT_STYLE = "modern"
+
+
+def _preset(style: str) -> dict:
+    return _STYLE_PRESETS.get(style, _STYLE_PRESETS[_DEFAULT_STYLE])
+
+
 # 안전 여백: 캔버스 폭의 이 비율만큼 좌우에 강제
 _MARGIN_PCT  = 0.07   # 7%
 _MIN_FONT_PX = 10     # 자동 축소 하한
@@ -37,6 +102,7 @@ class OverlayConfig:
     subtitle: str = ""
     body:     str = ""
     layout:   str = "full"
+    style:    str = _DEFAULT_STYLE   # "premium" | "modern" | "playful" | "tech"
 
 
 def apply_overlay(
@@ -47,33 +113,41 @@ def apply_overlay(
     result = img.copy().convert("RGBA")
     W, H   = result.size
     draw   = ImageDraw.Draw(result)
+    preset = _preset(config.style)
 
     if section_type in ("hero", "closing"):
-        _overlay_hero(result, draw, config, W, H)
+        _overlay_hero(result, draw, config, W, H, preset)
     elif section_type in ("features", "usage"):
-        _overlay_features(result, draw, config, W, H)
+        _overlay_features(result, draw, config, W, H, preset)
     elif section_type == "specs":
-        _overlay_specs(result, draw, config, W, H)
+        _overlay_specs(result, draw, config, W, H, preset)
     elif section_type == "callout":
-        _overlay_callout(result, draw, config, W, H)
+        _overlay_callout(result, draw, config, W, H, preset)
     else:
-        _overlay_hero(result, draw, config, W, H)
+        _overlay_hero(result, draw, config, W, H, preset)
 
     return result.convert("RGB")
 
 
 # ── 레이아웃별 오버레이 ───────────────────────────────────────────────
 
-def _overlay_hero(result, draw, cfg: OverlayConfig, W: int, H: int):
+def _dark_tint(accent: tuple, factor: float = 0.16) -> tuple:
+    """포인트 컬러를 어둡게 블렌드 — 그라디언트 바를 스타일별로 다르게 물들임."""
+    return tuple(int(c * factor) for c in accent[:3])
+
+
+def _overlay_hero(result, draw, cfg: OverlayConfig, W: int, H: int, preset: dict):
     if not cfg.title and not cfg.subtitle:
         return
 
+    accent  = preset["accent"]
+    tint    = _dark_tint(accent)
     bar_h    = int(H * 0.22)
     bar      = Image.new("RGBA", (W, bar_h), (0, 0, 0, 0))
     bar_draw = ImageDraw.Draw(bar)
     for i in range(bar_h):
-        alpha = int(180 * (i / bar_h))
-        bar_draw.rectangle([0, i, W, i + 1], fill=(0, 0, 0, alpha))
+        alpha = int(185 * (i / bar_h))
+        bar_draw.rectangle([0, i, W, i + 1], fill=(*tint, alpha))
     result.alpha_composite(bar, (0, H - bar_h))
 
     draw   = ImageDraw.Draw(result)
@@ -84,19 +158,19 @@ def _overlay_hero(result, draw, cfg: OverlayConfig, W: int, H: int):
 
     if cfg.title:
         size   = int(H * 0.055)
-        font_t, lines = _fit_text(cfg.title, size, max_w)
+        font_t, lines = _fit_text(cfg.title, size, max_w, candidates=preset["title_fonts"])
         line_h = _line_height(font_t)
         needed = len(lines) * line_h
         if y_base + needed > y_bot:
             y_base = max(H - bar_h + 4, y_bot - needed - int(bar_h * 0.1))
         for line in lines:
-            _draw_centered_line(draw, line, W, y_base, font_t, (255, 255, 255, 255))
+            _draw_centered_line(draw, line, W, y_base, font_t, (*accent, 255), stroke=True)
             y_base += line_h
         y_base += int(H * 0.008)
 
     if cfg.subtitle and y_base < y_bot:
         size   = int(H * 0.030)
-        font_s, lines = _fit_text(cfg.subtitle, size, max_w)
+        font_s, lines = _fit_text(cfg.subtitle, size, max_w, candidates=preset["body_fonts"])
         line_h = _line_height(font_s)
         for line in lines:
             if y_base + line_h > y_bot:
@@ -105,9 +179,10 @@ def _overlay_hero(result, draw, cfg: OverlayConfig, W: int, H: int):
             y_base += line_h
 
 
-def _overlay_features(result, draw, cfg: OverlayConfig, W: int, H: int):
+def _overlay_features(result, draw, cfg: OverlayConfig, W: int, H: int, preset: dict):
     margin = int(W * _MARGIN_PCT)
     max_w  = W - margin * 2
+    accent = preset["accent"]
 
     if cfg.title:
         bar_h  = int(H * 0.13)
@@ -115,29 +190,30 @@ def _overlay_features(result, draw, cfg: OverlayConfig, W: int, H: int):
         result.alpha_composite(bar, (0, 0))
         draw   = ImageDraw.Draw(result)
         size   = int(H * 0.045)
-        font_t, lines = _fit_text(cfg.title, size, max_w)
+        font_t, lines = _fit_text(cfg.title, size, max_w, candidates=preset["title_fonts"])
         line_h = _line_height(font_t)
         y      = int(bar_h * 0.18)
         for line in lines:
             if y + line_h > bar_h - 4:
                 break
-            _draw_centered_line(draw, line, W, y, font_t, (30, 30, 30, 255))
+            _draw_centered_line(draw, line, W, y, font_t, (*accent, 255))
             y += line_h
 
     if cfg.body:
-        _draw_body_bottom(result, cfg.body, W, H, max_w)
+        _draw_body_bottom(result, cfg.body, W, H, max_w, preset)
 
 
-def _overlay_specs(result, draw, cfg: OverlayConfig, W: int, H: int):
+def _overlay_specs(result, draw, cfg: OverlayConfig, W: int, H: int, preset: dict):
     if not cfg.body:
         return
     margin    = int(W * _MARGIN_PCT)
     max_w     = W - margin * 2
     _BOT_MARGIN = int(H * 0.025)   # 하단 안전 여백
+    accent    = preset["accent"]
 
     # ── wrap 먼저 → 실제 라인 수 기준으로 panel_h 계산 ──────────
     size   = int(H * 0.027)
-    font_b = _load_font(size)
+    font_b = _load_font(size, preset["body_fonts"])
     line_h = _line_height(font_b)
 
     raw_lines = [l for l in cfg.body.split("\n")]
@@ -146,7 +222,7 @@ def _overlay_specs(result, draw, cfg: OverlayConfig, W: int, H: int):
         if not raw.strip():
             all_subs.append(("", True))
         else:
-            _, wrapped = _fit_text(raw, size, max_w, font_b)
+            _, wrapped = _fit_text(raw, size, max_w, font_b, candidates=preset["body_fonts"])
             for w in wrapped:
                 all_subs.append((w, False))
 
@@ -159,6 +235,13 @@ def _overlay_specs(result, draw, cfg: OverlayConfig, W: int, H: int):
     panel = Image.new("RGBA", (W, panel_h), (255, 255, 255, 230))
     result.alpha_composite(panel, (0, H - panel_h))
     draw  = ImageDraw.Draw(result)
+
+    # 스타일 포인트컬러 세로 악센트 스트라이프 (좌측)
+    stripe_w = max(4, int(W * 0.012))
+    draw.rectangle(
+        [0, H - panel_h, stripe_w, H],
+        fill=(*accent, 255),
+    )
 
     y     = H - panel_h + pad
     y_bot = H - _BOT_MARGIN
@@ -173,24 +256,25 @@ def _overlay_specs(result, draw, cfg: OverlayConfig, W: int, H: int):
         y += line_h
 
 
-def _overlay_callout(result, draw, cfg: OverlayConfig, W: int, H: int):
+def _overlay_callout(result, draw, cfg: OverlayConfig, W: int, H: int, preset: dict):
     margin = int(W * _MARGIN_PCT)
     max_w  = W - margin * 2
+    accent = preset["accent"]
 
     if cfg.title:
         size   = int(H * 0.075)
-        font_t, lines = _fit_text(cfg.title, size, max_w)
+        font_t, lines = _fit_text(cfg.title, size, max_w, candidates=preset["title_fonts"])
         line_h = _line_height(font_t)
         total  = len(lines) * line_h
         y      = int(H * 0.40) - total // 2
         for line in lines:
             _draw_centered_line(draw, line, W, y, font_t,
-                                (255, 255, 255, 255), stroke=True)
+                                (255, 255, 255, 255), stroke=True, stroke_color=accent)
             y += line_h
 
     if cfg.subtitle:
         size   = int(H * 0.035)
-        font_s, lines = _fit_text(cfg.subtitle, size, max_w)
+        font_s, lines = _fit_text(cfg.subtitle, size, max_w, candidates=preset["body_fonts"])
         line_h = _line_height(font_s)
         y      = int(H * 0.53)
         for line in lines:
@@ -200,7 +284,7 @@ def _overlay_callout(result, draw, cfg: OverlayConfig, W: int, H: int):
             y += line_h
 
 
-def _draw_body_bottom(result, body: str, W: int, H: int, max_w: int):
+def _draw_body_bottom(result, body: str, W: int, H: int, max_w: int, preset: dict):
     """
     하단 그라디언트 바 위에 본문 텍스트 (v2 — 하단 잘림 완전 방지).
 
@@ -214,6 +298,7 @@ def _draw_body_bottom(result, body: str, W: int, H: int, max_w: int):
     _PAD_BOT_PCT    = 0.018
     _MAX_BAR_PCT    = 0.38    # bar 최대 높이 38%
     _MAX_LINES      = 10
+    tint = _dark_tint(preset["accent"])
 
     raw_lines = [l for l in body.split("\n") if l.strip()][-6:]
     if not raw_lines:
@@ -221,10 +306,10 @@ def _draw_body_bottom(result, body: str, W: int, H: int, max_w: int):
 
     # ── Step 1: wrap 완료된 서브라인 목록 먼저 확정 ──────────────
     def _collect_subs(sz: int):
-        fnt  = _load_font(sz)
+        fnt  = _load_font(sz, preset["body_fonts"])
         subs = []
         for raw in raw_lines:
-            _, wrapped = _fit_text(raw, sz, max_w, fnt)
+            _, wrapped = _fit_text(raw, sz, max_w, fnt, candidates=preset["body_fonts"])
             subs.extend(wrapped)
         return fnt, subs[:_MAX_LINES]
 
@@ -248,12 +333,12 @@ def _draw_body_bottom(result, body: str, W: int, H: int, max_w: int):
 
     bar_h = min(_calc_bar_h(), max_bar)
 
-    # ── Step 3: 그라디언트 bar 그리기 ───────────────────────────
+    # ── Step 3: 그라디언트 bar 그리기 (스타일 포인트컬러로 톤 다르게) ──
     bar = Image.new("RGBA", (W, bar_h), (0, 0, 0, 0))
     bd  = ImageDraw.Draw(bar)
     for i in range(bar_h):
         alpha = int(170 * (i / bar_h))
-        bd.rectangle([0, i, W, i + 1], fill=(0, 0, 0, alpha))
+        bd.rectangle([0, i, W, i + 1], fill=(*tint, alpha))
     result.alpha_composite(bar, (0, H - bar_h))
     draw = ImageDraw.Draw(result)
 
@@ -275,6 +360,7 @@ def _fit_text(
     size: int,
     max_w: int,
     font: Optional[ImageFont.ImageFont] = None,
+    candidates: Optional[list[str]] = None,
 ) -> tuple[ImageFont.ImageFont, list[str]]:
     """
     주어진 폰트 크기로 텍스트를 max_w에 맞게 wrapping.
@@ -284,7 +370,7 @@ def _fit_text(
         (사용된 font, 줄 목록)
     """
     size  = max(size, _MIN_FONT_PX)
-    font  = font or _load_font(size)
+    font  = font or _load_font(size, candidates)
     lines = _wrap_to_width(text, font, max_w)
 
     # 한 줄이라도 max_w 초과하면 폰트 축소 반복
@@ -305,7 +391,7 @@ def _fit_text(
         if not overflow:
             break
         size = max(size - 2, _MIN_FONT_PX)
-        font  = _load_font(size)
+        font  = _load_font(size, candidates)
         lines = _wrap_to_width(text, font, max_w)
         if size == _MIN_FONT_PX:
             break
@@ -374,6 +460,7 @@ def _line_height(font: ImageFont.ImageFont) -> int:
 def _draw_centered_line(
     draw, text: str, W: int, y: int,
     font, color: tuple, stroke: bool = False,
+    stroke_color: Optional[tuple] = None,
 ):
     """텍스트 1줄을 수평 중앙에 그림."""
     try:
@@ -383,18 +470,26 @@ def _draw_centered_line(
         kw: dict = {"fill": color, "font": font}
         if stroke:
             kw["stroke_width"] = 3
-            kw["stroke_fill"]  = (0, 0, 0, 200)
+            kw["stroke_fill"]  = (*stroke_color[:3], 220) if stroke_color else (0, 0, 0, 200)
         draw.text((tx, y), text, **kw)
     except Exception as e:
         print(f"[TextOverlay] 텍스트 그리기 오류: {e}")
 
 
-def _load_font(size: int) -> ImageFont.ImageFont:
+def _load_font(size: int, candidates: Optional[list[str]] = None) -> ImageFont.ImageFont:
     size = max(size, _MIN_FONT_PX)
-    for path in _FONT_CANDIDATES:
+    for path in (candidates or _FONT_CANDIDATES):
         if os.path.isfile(path):
             try:
                 return ImageFont.truetype(path, size)
             except OSError:
                 continue
+    # 지정 폰트 후보가 전부 실패하면 기본 후보로 폴백
+    if candidates:
+        for path in _FONT_CANDIDATES:
+            if os.path.isfile(path):
+                try:
+                    return ImageFont.truetype(path, size)
+                except OSError:
+                    continue
     return ImageFont.load_default()

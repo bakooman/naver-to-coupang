@@ -110,6 +110,7 @@ class PriceWatch:
     acked:         bool          = False # 확인완료 처리됨 — True면 재알림 억제
     store:         str           = "샵케이"  # "샵케이" / "제니스 트레이딩"
     alerted:       bool          = False # 텔레그램 발송 완료 — True면 다음 스케줄에서 재발송 차단
+    wing_product_id: str         = ""    # Wing 등록상품ID 캐시 (/price-fix 엑셀 업로드 매칭 시 저장, 검색용)
 
 
 def _now_str() -> str:
@@ -181,24 +182,26 @@ def _fetch_product_info(url: str, timeout: int = 12) -> dict:
     """
     URL → {"name": str, "price": int, "soldout": bool, "error": str}
 
-    1순위) 직접 requests
-    2순위) BrightData Web Unlocker (직접 요청 실패 시만)
+    직접 요청만 사용 (BrightData 등 유료 API 사용 안 함).
+    curl_cffi(Chrome TLS 흉내) + 전체 쿠키 조합이 아니면 네이버 WAF가 캡차를 반환함.
     __PRELOADED_STATE__ 우선 파싱 → meta tag fallback.
     """
-    # ── 1순위: 직접 요청 ─────────────────────────────────────────
     html = None
+    headers = dict(_HEADERS)
+    cookie_str = _load_naver_cookie_str()
+    if cookie_str:
+        headers["Cookie"] = cookie_str
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=timeout, verify=False)
+        if _CFFI_OK:
+            resp = cffi_requests.get(url, headers=headers, timeout=timeout, impersonate="chrome")
+        else:
+            resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
         resp.raise_for_status()
         # 봇 차단 감지: __PRELOADED_STATE__ 없으면 실패로 간주
         if resp.status_code == 200 and "__PRELOADED_STATE__" in resp.text:
             html = resp.text
     except Exception:
         pass
-
-    # ── 2순위: BrightData Web Unlocker (직접 요청 실패 시만) ─────
-    if html is None:
-        html = _brightdata_fetch(url, timeout=90)
 
     if html is None:
         return {"name": "", "price": 0, "soldout": False, "error": "fetch failed"}
@@ -500,7 +503,8 @@ def check_one(pw: PriceWatch) -> PriceWatch:
     elif pw.acked:
         # acked=True 상태에서 → 실제로 품절 이력이 있을 때만 재입고 처리
         # 품절 아닌 알림(fallen/risen)을 확인완료 했을 때 오탐 방지
-        _was_soldout = any(h.get("soldout") for h in pw.history[-10:])
+        # 최근 60회(하루 2회 체크 기준 약 30일)까지 봐서, 오래 품절돼있다 재입고된 경우도 감지
+        _was_soldout = any(h.get("soldout") for h in pw.history[-60:])
         if _was_soldout:
             pw.status = "restocked"
             pw.acked  = False
@@ -517,7 +521,9 @@ def check_one(pw: PriceWatch) -> PriceWatch:
         pw.change = new_price - pw.base_price
         if pw.change > 0:
             pw.status = "risen"
-        elif pw.change < 0:
+        elif pw.change < 0 and abs(pw.change) >= pw.base_price * 0.10:
+            # 가격하락은 기준가 대비 10% 이상 떨어졌을 때만 알림
+            # (10% 미만이면 상태 유지 "ok", base_price는 그대로 둬서 누적 하락분이 계속 비교됨)
             pw.status = "fallen"
         else:
             pw.status = "ok"
@@ -701,6 +707,49 @@ def reset_base_price(uid: str) -> None:
     _save(watches)
 
 
+def reset_base_prices_bulk(uids) -> int:
+    """reset_base_price를 여러 uid에 대해 일괄 처리 — uid마다 파일을 다시 읽고 쓰면
+    (price_watch.json 수천 개 항목 기준) 매우 느려지므로 한 번의 로드/저장으로 처리.
+    변경된 개수 반환."""
+    uid_set = set(uids)
+    if not uid_set:
+        return 0
+    watches = _load()
+    changed = 0
+    for w in watches:
+        if w.uid in uid_set:
+            w.base_price = w.current_price
+            w.status     = "ok"
+            w.change     = 0
+            w.acked      = True
+            w.alerted    = False
+            if hasattr(w, "history") and isinstance(w.history, list):
+                for h in w.history:
+                    if isinstance(h, dict) and h.get("soldout"):
+                        h["soldout"] = False
+            changed += 1
+    if changed:
+        _save(watches)
+    return changed
+
+
+def set_wing_product_ids(id_map: dict) -> int:
+    """uid → Wing 등록상품ID 매핑을 일괄 저장 (/price-fix 엑셀 업로드 매칭 시 캐싱).
+    변경된 개수 반환."""
+    if not id_map:
+        return 0
+    watches = _load()
+    changed = 0
+    for w in watches:
+        new_id = id_map.get(w.uid)
+        if new_id and w.wing_product_id != new_id:
+            w.wing_product_id = new_id
+            changed += 1
+    if changed:
+        _save(watches)
+    return changed
+
+
 def reset_all_base_prices() -> int:
     """전체 base_price를 current_price로 리셋 (오탐 일괄 정리용).
     품절(soldout) 항목은 건드리지 않음.
@@ -792,7 +841,8 @@ def _process_price_report_inner(results: list) -> dict:
             else:
                 pw.status = "soldout";  pw.change = 0
         elif pw.acked:
-            _was_soldout = any(h.get("soldout") for h in pw.history[-10:])
+            # 최근 60회(하루 2회 체크 기준 약 30일)까지 봐서 오래 품절돼있다 재입고된 경우도 감지
+            _was_soldout = any(h.get("soldout") for h in pw.history[-60:])
             if _was_soldout:
                 pw.status = "restocked";  pw.acked = False
                 pw.base_price = new_price;  pw.change = 0
@@ -803,7 +853,13 @@ def _process_price_report_inner(results: list) -> dict:
                 pw.status = "ok";  pw.change = 0
         elif new_price > 0 and pw.base_price > 0:
             pw.change = new_price - pw.base_price
-            pw.status = "risen" if pw.change > 0 else ("fallen" if pw.change < 0 else "ok")
+            if pw.change > 0:
+                pw.status = "risen"
+            elif pw.change < 0 and abs(pw.change) >= pw.base_price * 0.10:
+                # 가격하락은 기준가 대비 10% 이상일 때만 알림
+                pw.status = "fallen"
+            else:
+                pw.status = "ok"
         else:
             pw.status = "ok";  pw.change = 0
 

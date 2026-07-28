@@ -13,6 +13,7 @@ class Settings:
     IMAGE_ORIGINAL_DIR  = str(BASE_DIR / "data" / "images" / "original")
     IMAGE_NOBG_DIR      = str(BASE_DIR / "data" / "images" / "nobg")
     IMAGE_COMPOSED_DIR  = str(BASE_DIR / "data" / "images" / "composed")
+    IMAGE_AI_DIR        = str(BASE_DIR / "data" / "images" / "ai_bg")
     OUTPUT_DIR          = str(BASE_DIR / "data" / "output")
 
     # ── 이미지 캔버스 ─────────────────────────────────────

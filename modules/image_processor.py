@@ -21,17 +21,26 @@ from PIL import Image, ImageDraw, ImageFont
 from config.settings import Settings
 
 
-# ── 폰트 후보 (Windows → Linux 순) ──────────────────────────────
-_FONT_CANDIDATES = [
-    "data/fonts/NotoSansKR-Light.otf",  # Noto Sans KR Light — 가장 얇음 (프로젝트 내장)
-    "C:/Windows/Fonts/malgunsl.ttf",    # 맑은 고딕 Semilight (Windows)
-    "C:/Windows/Fonts/malgun.ttf",      # 맑은 고딕 Regular   (Windows)
-    "C:/Windows/Fonts/malgunbd.ttf",    # 맑은 고딕 Bold      (fallback)
-    "C:/Windows/Fonts/gulim.ttc",       # 굴림                (Windows)
-    "/usr/share/fonts/truetype/nanum/NanumGothicLight.ttf",
+# ── 배지 전용 폰트 후보 (Linux 서버 우선 — NanumSquareRound: 둥근 배지와
+#    어울리는 모던하고 전문적인 인상, 기존 NanumGothic보다 덜 투박함) ──────
+_FONT_CANDIDATES_BOLD = [
+    "/usr/share/fonts/truetype/nanum/NanumSquareRoundB.ttf",  # 나눔스퀘어라운드 Bold (서버)
+    "/usr/share/fonts/truetype/nanum/NanumSquareB.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+    "C:/Windows/Fonts/malgunbd.ttf",    # 맑은 고딕 Bold (Windows 로컬 개발용)
+    "C:/Windows/Fonts/gulim.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+]
+_FONT_CANDIDATES_REGULAR = [
+    "/usr/share/fonts/truetype/nanum/NanumSquareRoundR.ttf",  # 나눔스퀘어라운드 Regular (서버)
+    "/usr/share/fonts/truetype/nanum/NanumSquareR.ttf",
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "C:/Windows/Fonts/malgun.ttf",      # 맑은 고딕 Regular (Windows 로컬 개발용)
+    "C:/Windows/Fonts/gulim.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
+# 기존 코드 호환용 (self.font — 현재 미사용이나 초기화 유지)
+_FONT_CANDIDATES = _FONT_CANDIDATES_REGULAR
 
 
 class ImageProcessor:
@@ -51,12 +60,14 @@ class ImageProcessor:
         product_id: str,
         quantities: list[int] | None = None,
         skip_nobg: bool = False,
+        unit_label: str = "개",
     ) -> dict[int, str]:
         """
         원본 이미지를 받아 묶음별 합성 이미지를 생성하고 경로를 반환.
 
         Args:
             skip_nobg: True 이면 배경 제거(누끼) 없이 원본 이미지로 합성.
+            unit_label: 수량 배지 단위 텍스트 ("개" / "세트" / "박스" / "묶음").
 
         Returns:
             {1: "path/1ea.jpg", 2: "path/2ea.jpg", 3: "path/3ea.jpg"}
@@ -98,7 +109,7 @@ class ImageProcessor:
                     labeled = composed
                     print(f"[ImageProcessor] 단일상품(1~1) — 배지 스킵")
                 else:
-                    labeled = self._stamp_label(composed, qty)
+                    labeled = self._stamp_label(composed, qty, unit_label)
                 path     = self._save(labeled, product_id, qty)
                 result[qty] = path
                 print(f"[ImageProcessor] {qty}개 이미지 저장 완료: {path}")
@@ -288,23 +299,30 @@ class ImageProcessor:
 
     # ── Step 3: 좌측 하단 원형 수량 배지 ────────────────────────
 
-    def _stamp_label(self, image: Image.Image, qty: int) -> Image.Image:
+    def _stamp_label(self, image: Image.Image, qty: int, unit: str = "개") -> Image.Image:
         """
         좌측 하단 원형 배지 + 수량 텍스트.
 
         스타일:
-          샵케이        : 흰색 채움 + 검정 테두리 + 검정 글씨 (기존, 원형)
-          제니스 트레이딩: 검정 채움 (테두리 없음) + 흰색 글씨 (원형)
-          포트          : 흰색 채움 + 검정 테두리 + 검정 글씨 (모서리 둥근 사각형)
+          샵케이        : 흰색 채움 + 검정 테두리 + 검정 글씨 (원형 — "개"일 때만)
+          제니스 트레이딩: 검정 채움 (테두리 없음) + 흰색 글씨 — "개"일 때만 원형.
+                          세트/박스/묶음일 때는 포트와 동일하게 흰색 채움 + 검정
+                          테두리 + 검정 글씨로 전환 (검정 배경은 "개" 전용 정체성).
+          포트          : 흰색 채움 + 검정 테두리 + 검정 글씨 (모서리 둥근 사각형, 항상)
+
+          단위가 "개"가 아닐 때(세트/박스/묶음)는 글자수가 많아 원형에 넣으면 잘 안 보여서
+          샵케이/제니스 전부 포트와 동일한 흰색+검정테두리 모서리 둥근 사각형으로 통일.
 
         크기 기준 (800×800 캔버스):
           원 지름  ≈ 152 px  (캔버스 단변의 19%)
           1~9개   : 폰트 약 68 px
           10~15개 : 폰트 약 50 px
+
+        unit: 수량 단위 텍스트 ("개" / "세트" / "박스" / "묶음") — 글자수가 길수록 폰트 축소.
         """
         draw  = ImageDraw.Draw(image)
         W, H  = image.size
-        text  = f"{qty}개"
+        text  = f"{qty}{unit}"
 
         # ── 배지 크기·위치 ──────────────────────────────────────
         d      = int(min(W, H) * 0.194)  # 0.215 → 0.194 (10% 축소)
@@ -314,14 +332,19 @@ class ImageProcessor:
         _store     = getattr(self, "store", "샵케이")
         _is_zenith = (_store == "제니스 트레이딩")
         _is_port   = (_store == "포트")
+        _long_unit = (unit != "개")           # 세트/박스/묶음 — 원형엔 좁음
+        _use_rect  = _is_port or _long_unit   # 모서리 둥근 사각형 사용 여부
 
-        # 포트: 원이 아닌 모서리 둥근 사각형 → 가로폭을 세로보다 넓게
-        rw = int(d * 1.2) if _is_port else d
+        # 사각형일 때 가로폭 확장 (장문 단위는 더 넉넉하게)
+        if _use_rect:
+            rw = int(d * (1.35 if _long_unit else 1.2))
+        else:
+            rw = d
         cx = margin + rw // 2
         cy = H - margin - d // 2
 
-        if _is_zenith:
-            # 검정 채움 원, 테두리 없음
+        if _is_zenith and not _use_rect:
+            # 검정 채움 원, 테두리 없음 ("개" 전용 — 기존 스타일 유지)
             draw.ellipse(
                 [cx - d // 2, cy - d // 2,
                  cx + d // 2, cy + d // 2],
@@ -330,8 +353,9 @@ class ImageProcessor:
             text_color   = (255, 255, 255)
             stroke_fill  = (255, 255, 255)  # 흰 stroke → 흰 텍스트 두껍게
             stroke_width = 5
-        elif _is_port:
+        elif _use_rect:
             # 흰색 채움 + 검정 테두리, 모서리 둥근 사각형
+            # (포트 항상 / 장문단위(세트·박스·묶음)는 샵케이·제니스도 이 스타일로 통일)
             border_w = max(2, int(d * 0.026))
             draw.rounded_rectangle(
                 [cx - rw // 2, cy - d // 2,
@@ -345,7 +369,7 @@ class ImageProcessor:
             stroke_fill  = (0, 0, 0)
             stroke_width = 2
         else:
-            # 흰색 채움 + 검정 테두리 (기존 샵케이 스타일)
+            # 흰색 채움 + 검정 테두리 (기존 샵케이 원형 스타일)
             border_w = max(2, int(d * 0.026))
             draw.ellipse(
                 [cx - d // 2, cy - d // 2,
@@ -358,20 +382,37 @@ class ImageProcessor:
             stroke_fill  = (0, 0, 0)
             stroke_width = 2
 
-        # ── 폰트 크기 결정 ───────────────────────────────────────
-        font_size = int(d * 0.46) if qty < 10 else int(d * 0.34)  # 글씨 크게
-        font = self._load_font(font_size)
+        # ── 폰트 크기 결정 — 숫자는 크게(Bold) / 단위는 작게(Regular) ──────
+        # 숫자·단위를 분리 렌더링해 "3" 크게 + "개" 작게 같은 전문적인 태그 느낌을 낸다.
+        qty_str, unit_str = str(qty), unit
+        num_font_size  = int(d * (0.50 if len(qty_str) < 2 else 0.40))
+        unit_font_size = int(d * (0.30 if len(unit_str) < 2 else 0.24))
+        num_font  = self._load_font(num_font_size, bold=True)
+        unit_font = self._load_font(unit_font_size, bold=False)
 
-        # ── 텍스트 원 중앙 정렬 ──────────────────────────────────
-        bbox = draw.textbbox((0, 0), text, font=font)
-        tw   = bbox[2] - bbox[0]
-        th   = bbox[3] - bbox[1]
-        tx   = cx - tw // 2 - bbox[0]
-        ty   = cy - th // 2 - bbox[1]
+        num_bbox  = draw.textbbox((0, 0), qty_str, font=num_font)
+        unit_bbox = draw.textbbox((0, 0), unit_str, font=unit_font)
+        num_w   = num_bbox[2] - num_bbox[0]
+        unit_w  = unit_bbox[2] - unit_bbox[0]
+        gap     = max(1, int(d * 0.03))
+        total_w = num_w + gap + unit_w
 
-        stroke_width = 4 if _is_zenith else 3  # 한 단계 얇게
-        draw.text((tx, ty), text, fill=text_color, font=font,
-                  stroke_width=stroke_width, stroke_fill=stroke_fill)
+        # ── 숫자+단위 조합을 배지 중앙에 정렬, 하단(baseline) 맞춤 ────────
+        start_x = cx - total_w // 2
+        num_x   = start_x - num_bbox[0]
+        num_y   = cy - (num_bbox[3] - num_bbox[1]) // 2 - num_bbox[1]
+        num_bottom = num_y + num_bbox[3]
+        unit_x  = start_x + num_w + gap - unit_bbox[0]
+        unit_y  = num_bottom - unit_bbox[3]
+
+        _is_black_fill = _is_zenith and not _use_rect
+        stroke_w_num  = 4 if _is_black_fill else 3
+        stroke_w_unit = 3 if _is_black_fill else 2
+
+        draw.text((num_x, num_y), qty_str, fill=text_color, font=num_font,
+                  stroke_width=stroke_w_num, stroke_fill=stroke_fill)
+        draw.text((unit_x, unit_y), unit_str, fill=text_color, font=unit_font,
+                  stroke_width=stroke_w_unit, stroke_fill=stroke_fill)
 
         return image
 
@@ -523,8 +564,9 @@ class ImageProcessor:
         return img.resize((new_w, new_h), Image.LANCZOS)
 
     @staticmethod
-    def _load_font(size: int) -> ImageFont.ImageFont:
-        for path in _FONT_CANDIDATES:
+    def _load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+        candidates = _FONT_CANDIDATES_BOLD if bold else _FONT_CANDIDATES_REGULAR
+        for path in candidates:
             if os.path.isfile(path):
                 try:
                     return ImageFont.truetype(path, size)

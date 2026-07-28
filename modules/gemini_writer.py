@@ -24,6 +24,19 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+# ── 이모지 렌더링 (PIL 텍스트 렌더러 전용) ──────────────────────────
+# NotoColorEmoji.ttf는 109px 고정 비트맵 strike 1개만 내장되어 있어
+# 본문 폰트 크기(16~21px)로 바로 로드하면 "invalid pixel size" 에러가 남.
+# → 항상 109px로 렌더링한 뒤 원하는 크기로 축소해 붙여넣는 방식으로 우회.
+_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "\U00002B00-\U00002BFF\U00002190-\U000021FF]\U0000FE0F?"
+)
+_EMOJI_FONT_PATH = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+_EMOJI_FONT_PX   = 109
+_emoji_font_cache = None
+_emoji_img_cache: dict[tuple[str, int], object] = {}
+
 
 def _load_image_bytes(url: str, timeout: int = 8) -> Optional[bytes]:
     try:
@@ -74,10 +87,43 @@ def _extract_specs(raw_json: dict, depth: int = 0) -> dict[str, str]:
     return result
 
 
+def _load_emoji_font():
+    """NotoColorEmoji.ttf 로드 (109px 고정 strike만 존재 — 캐싱해서 재사용)."""
+    global _emoji_font_cache
+    if _emoji_font_cache is None:
+        try:
+            from PIL import ImageFont as _F
+            _emoji_font_cache = _F.truetype(_EMOJI_FONT_PATH, _EMOJI_FONT_PX)
+        except Exception:
+            _emoji_font_cache = False  # 로드 실패 표시 (재시도 방지)
+    return _emoji_font_cache or None
+
+
+def _render_emoji(ch: str, px: int):
+    """이모지 1개(+선택적 변형선택자) → 지정 픽셀 크기의 RGBA 이미지. 실패 시 None."""
+    key = (ch, px)
+    if key in _emoji_img_cache:
+        return _emoji_img_cache[key]
+    font = _load_emoji_font()
+    if font is None:
+        return None
+    try:
+        from PIL import Image as _I, ImageDraw as _D
+        tmp = _I.new("RGBA", (140, 140), (0, 0, 0, 0))
+        _D.Draw(tmp).text((0, 0), ch, font=font, embedded_color=True)
+        bbox = tmp.getbbox()
+        result = tmp.crop(bbox).resize((px, px), _I.LANCZOS) if bbox else None
+    except Exception:
+        result = None
+    _emoji_img_cache[key] = result
+    return result
+
+
 def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
     """
-    Playwright(Chromium) 로 HTML → PNG 렌더링.
-    NotoColorEmoji 폰트 지원 → 이모지 완벽 출력.
+    PIL로 HTML(h3/p/li)을 직접 파싱해 PNG로 렌더링 (Playwright 미사용 — 서버 경량화).
+    한글은 나눔고딕, 이모지는 NotoColorEmoji를 109px로 렌더링 후 축소 합성해서
+    (PIL은 컬러비트맵 폰트를 임의 크기로 직접 로드 못 함) 정상 출력한다.
     """
     full_html = (
         "<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
@@ -169,7 +215,21 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         CHAR_W    = width - PAD_X * 2  # 텍스트 가용 픽셀 폭
 
         # 한글 문자 실제 폭을 PIL로 측정해서 줄바꿈 계산
+        # 이모지는 한글 폰트에 글리프가 없어 폭이 0으로 측정되므로 폰트크기로 근사
         def _measure(text: str, font) -> int:
+            total, pos = 0, 0
+            for m in _EMOJI_RE.finditer(text):
+                if m.start() > pos:
+                    total += _measure_plain(text[pos:m.start()], font)
+                total += font.size
+                pos = m.end()
+            if pos < len(text):
+                total += _measure_plain(text[pos:], font)
+            return total
+
+        def _measure_plain(text: str, font) -> int:
+            if not text:
+                return 0
             try:
                 return int(font.getlength(text))
             except Exception:
@@ -177,6 +237,24 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
                     return font.getbbox(text)[2]
                 except Exception:
                     return len(text) * 16
+
+        def _draw_mixed_line(x0: int, y: int, line: str, font, color) -> None:
+            """텍스트+이모지 혼합 줄을 그린다 (이모지는 별도 비트맵 합성)."""
+            x, pos = x0, 0
+            emoji_px = font.size
+            for m in _EMOJI_RE.finditer(line):
+                if m.start() > pos:
+                    seg = line[pos:m.start()]
+                    draw.text((x, y), seg, font=font, fill=color)
+                    x += _measure_plain(seg, font)
+                em_img = _render_emoji(m.group(), emoji_px)
+                if em_img is not None:
+                    img.paste(em_img, (int(x), int(y + font.size * 0.08)), em_img)
+                x += emoji_px + 2
+                pos = m.end()
+            if pos < len(line):
+                seg = line[pos:]
+                draw.text((x, y), seg, font=font, fill=color)
 
         def _wrap_text(text: str, font, max_w: int) -> list[str]:
             """픽셀 폭 기준 텍스트 줄바꿈."""
@@ -214,14 +292,14 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         for tag, text in blocks:
             if tag == "h3":
                 for line in _wrap_text(text, FONT_H3, CHAR_W):
-                    draw.text((PAD_X, y), line, font=FONT_H3, fill=(26, 26, 26))
+                    _draw_mixed_line(PAD_X, y, line, FONT_H3, (26, 26, 26))
                     y += LINE_H_H3
                 draw.line([(PAD_X, y), (width - PAD_X, y)], fill=(220, 220, 220), width=2)
                 y += 8 + 14
             else:
                 prefix = "• " if tag == "li" else ""
                 for line in _wrap_text(prefix + text, FONT_P, CHAR_W):
-                    draw.text((PAD_X, y), line, font=FONT_P, fill=(68, 68, 68))
+                    _draw_mixed_line(PAD_X, y, line, FONT_P, (68, 68, 68))
                     y += LINE_H_P
                 y += 6
 
@@ -242,15 +320,24 @@ def generate_detail_image_url(
     model: str = "gemini-2.5-flash",
     upload_fn=None,        # R2 업로드 함수: bytes → str(url) 또는 None
     product_id: str = "",  # R2 파일명용
+    ref_images: list[str] | None = None,  # 정확한 스펙 확인용 참고이미지 URL (고객 비공개)
+    ref_text: str = "",                   # 정확한 스펙 확인용 참고텍스트 (고객 비공개)
 ) -> str:
     """
     Gemini로 판매 설명 생성 → 이미지 렌더링 → R2 업로드 → URL 반환.
+
+    ref_images/ref_text: 사용량(L)·호환기기 등 raw_json만으로는 부정확하게 추측될 수 있는
+    상품(정수필터 등)을 위해, 사용자가 스마트스토어 상세페이지에서 직접 캡처/복사한 참고자료.
+    제공되면 Gemini가 수치·스펙을 추측하지 않고 이 자료를 최우선으로 참고하도록 강제한다.
 
     Returns:
         R2 이미지 URL 문자열. 실패 시 빈 문자열.
     """
     # ── 1. Gemini 텍스트 생성 ──────────────────────────────────────
-    html_text = _generate_text(product_name, image_url, raw_json, api_key, model)
+    html_text = _generate_text(
+        product_name, image_url, raw_json, api_key, model,
+        ref_images=ref_images, ref_text=ref_text,
+    )
     if not html_text:
         return ""
 
@@ -283,6 +370,8 @@ def _generate_text(
     raw_json: dict,
     api_key: str,
     model: str,
+    ref_images: list[str] | None = None,
+    ref_text: str = "",
 ) -> str:
     """Gemini API 호출 → 판매 설명 HTML 텍스트 반환."""
     try:
@@ -296,6 +385,39 @@ def _generate_text(
         if specs:
             lines = [f"- {k}: {v}" for k, v in list(specs.items())[:15]]
             spec_text = "\n".join(lines)
+
+        # ── 참고자료 이미지 다운로드 (있으면) ─────────────────────
+        # 사용량(L)·호환기기 등 raw_json만으로는 부정확하게 추측되는 스펙을
+        # 사용자가 스마트스토어에서 직접 캡처한 이미지로 정확히 확인시킨다.
+        ref_image_parts = []
+        for _ru in (ref_images or [])[:5]:
+            _rb = _load_image_bytes(_ru)
+            if _rb:
+                _ru_low = _ru.lower()
+                _rmime = (
+                    "image/png" if _ru_low.endswith(".png")
+                    else "image/webp" if _ru_low.endswith(".webp")
+                    else "image/jpeg"
+                )
+                ref_image_parts.append(types.Part.from_bytes(data=_rb, mime_type=_rmime))
+            else:
+                print(f"[Gemini] 참고이미지 다운로드 실패: {_ru[:80]}")
+        print(
+            f"[Gemini] 참고자료: 이미지 {len(ref_image_parts)}/{len(ref_images or [])}장 로드, "
+            f"텍스트 {len(ref_text)}자"
+        )
+
+        ref_block = ""
+        if ref_image_parts:
+            ref_block += (
+                "\n[참고자료 — 첨부된 이미지]\n"
+                "위에 첨부된 이미지는 실제 스마트스토어 상세페이지에서 가져온 참고자료입니다. "
+                "사용량(L), 용량, 호환 가능 기기, 규격 등 구체적인 수치·스펙 정보는 반드시 이 "
+                "참고자료를 확인해서 정확하게 반영하세요. 참고자료에 없거나 불확실한 수치는 "
+                "추측하지 말고 언급을 생략하세요.\n"
+            )
+        if ref_text:
+            ref_block += f"\n[참고자료 — 사용자 제공 텍스트]\n{ref_text}\n"
 
         prompt = textwrap.dedent(f"""
             당신은 쿠팡 정책을 완벽하게 준수하면서 매출을 일으키는 전문 상품 기획자(MD) 겸 카피라이터입니다.
@@ -318,7 +440,8 @@ def _generate_text(
                아래 표현은 어떠한 변형·유사 표현으로도 절대 사용하지 마세요.
                - 순위·우위: 1위, 최고, 최초, 최대, 가장, 유일한, 독보적
                - 의학적 오인: 피부과(추천·테스트·인증 등), 임상(완료·증명·실험 등),
-                 효과 보장, 부작용 없음, 치료, 완치, 개선 효과 입증
+                 효과 보장, 부작용 없음, 치료, 완치, 개선 효과 입증,
+                 알레르기 완화·감소·개선, 알레르겐 감소·제거·억제 (사람·반려동물 공통 금지)
                - 과장·허위: 기적, 혁신적, 놀라운, 완벽, 무조건, 특효, 전문가 추천,
                  세계 최고, 인생 제품
 
@@ -419,7 +542,9 @@ def _generate_text(
             1. 소비자 이점 중심: 소비자가 이 제품을 쓰면 무엇을 얻는지(보습 지속 시간,
                향기, 성분 특징, 편의성 등) 구체적으로 서술하세요.
             2. 팩트 기반: 제공된 스펙·성분·구성 정보를 반드시 활용하고,
-               확인되지 않은 효능·효과는 단정하지 마세요.
+               확인되지 않은 효능·효과는 단정하지 마세요. 사용량(L)·호환기기 등 구체적인
+               수치는 아래 [참고자료]가 있으면 그 자료를 최우선으로 신뢰하고, 참고자료와
+               다른 값을 임의로 추측해서 쓰지 마세요.
             3. 자연스러운 한국어 문체(~합니다, ~해요)로 설득력 있는 세일즈 카피 작성.
             4. 성분·규격·용량·구성 정보가 있으면 ul/li로 깔끔하게 정리하세요.
             5. 판매자 정보, 쇼핑몰 홍보, 배송 안내는 일절 쓰지 마세요.
@@ -446,6 +571,7 @@ def _generate_text(
             {product_name}
 
             {f"[상품 속성/스펙]{chr(10)}{spec_text}" if spec_text else ""}
+            {ref_block}
 
             ══════════════════════════════════════════
             [출력 구조 — 반드시 이 순서로]
@@ -472,7 +598,7 @@ def _generate_text(
             4. 상품 필수 정보 (h3 + ul/li — 용량·원산지·포장 등 팩트 정보)
         """).strip()
 
-        parts = [types.Part.from_text(text=prompt)]
+        parts = ref_image_parts + [types.Part.from_text(text=prompt)]
 
         response = client.models.generate_content(model=model, contents=parts)
         raw_text = (response.text or "").strip()

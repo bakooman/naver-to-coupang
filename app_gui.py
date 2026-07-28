@@ -32,6 +32,7 @@ from nicegui import app as _app, ui
 from config.settings import Settings
 from modules.crawler import NaverStoreCrawler, ProductData
 from modules.image_processor import ImageProcessor
+from modules.ai_bg_regen import regenerate_background
 from modules.price_calculator import PriceCalculator
 from modules.image_uploader import upload_pil, upload_file, upload_url
 from modules.excel_builder import ExcelBuilder, BulkItem, Bundle
@@ -412,6 +413,7 @@ class QueueEntry:
     min_qty:           int  = 1           # 최솟값 (기본 1개, 수정 가능)
     draft:             bool = False       # True = Wing 임시저장 (판매시작일 공란 → 상세페이지 직접 수정)
     use_nobg:          bool = False       # 항목별 누끼 설정 (파일 업로드 시점에 저장)
+    ai_bg_regen:       bool = False       # True = 로컬 누끼 대신 Gemini AI 배경 재생성 사용
     gtin:              str  = ""          # 바코드(GTIN) — GS1 Korea 자동조회 or 수동입력
     naver_price:       int  = 0           # 네이버 크롤링 원가(1개 기준) — 가격감시 기준가용
     source_file:       str  = ""          # 출처 파일명 (.txt) or "" (단일 URL 직접 입력)
@@ -433,6 +435,9 @@ class QueueEntry:
     extra_detail_text:    str        = ""          # 상세 이미지 하단 추가 텍스트 (이미지로 렌더링)
     custom_image_path:    str        = ""          # 사용자 지정 대표이미지 로컬 경로 — 설정 시 네이버 원본 이미지 대체
     bundle_unit:          int        = 0           # N개마다 배송비 부과 단위 (0=미사용/단일배송비, >0=N개마다 추가)
+    badge_unit:           str        = "개"          # 대표이미지 수량 배지 단위 ("개"/"세트"/"박스"/"묶음")
+    detail_ref_images:    list[str]  = field(default_factory=list)  # Gemini 판매멘트 생성용 참고이미지 (고객 비공개)
+    detail_ref_text:      str        = ""          # Gemini 판매멘트 생성용 참고텍스트 (고객 비공개)
     # 사용자가 직접 지정한 추가 옵션 (자동 추출 옵션 뒤에 병합됨)
     # 예: [("색상", "블랙"), ("사이즈", "M")]
 
@@ -833,14 +838,22 @@ async def _resolve_brand_korean(brand: str, product_name: str = "") -> str:
                 )
             else:
                 # 짧은 한국어 브랜드 — 잘못된 표기 정정 질의
+                # ⚠️ 무명 소규모 제조사 브랜드까지 "정정"을 시도하다 완전히 다른
+                #    실존 회사명으로 환각하는 사고가 있었음(견우푸드→청우식품) →
+                #    "확실할 때만 고치고, 모르면 반드시 원본 유지"를 명시적으로 강제.
                 _prompt = (
                     f"브랜드명: {brand}\n"
                     f"상품명: {product_name[:80]}\n\n"
-                    "이 상품의 실제 제조사 공식 브랜드명을 쿠팡 기준으로 답하세요.\n"
-                    "⚠️ 브랜드 표기가 틀렸을 수 있습니다. 상품 내용을 보고 올바른 공식 브랜드명을 확인하세요.\n"
-                    "예) 브랜드='너드', 상품='레인보우 구미 클러스터' → 너즈  (Nerds 공식 한국어명)\n"
+                    "이 브랜드명이 100% 확실한 오타/오표기라고 확신할 때만 올바른 공식 브랜드명으로 "
+                    "정정하세요.\n"
+                    "⚠️ 조금이라도 불확실하거나, 이 브랜드를 잘 모르거나, 실존 여부를 확인할 수 없으면 "
+                    "반드시 입력받은 브랜드명 원본 그대로 답하세요. 절대로 추측으로 다른 회사명을 "
+                    "만들어내지 마세요 — 모르면 원본 그대로가 항상 정답입니다.\n"
+                    "예) 브랜드='너드', 상품='레인보우 구미 클러스터' → 너즈  (Nerds 공식 한국어명, 확실함)\n"
                     "예) 브랜드='도브', 상품='비타민C 비누' → 도브  (이미 올바름)\n"
-                    "이미 올바른 브랜드명이면 그대로 답하세요. 브랜드명만 답하세요. 설명 금지."
+                    "예) 브랜드='견우푸드', 상품='궁육포 쇠고기 육포' → 견우푸드  "
+                    "(잘 모르는 소규모 브랜드 — 원본 그대로 유지, 다른 회사명으로 바꾸면 안 됨)\n"
+                    "브랜드명만 답하세요. 설명 금지."
                 )
             loop = asyncio.get_running_loop()
             resp = await loop.run_in_executor(
@@ -1949,6 +1962,31 @@ def _has_banned_keyword(name: str) -> list[str]:
     return [m.group(1) for m in _BANNED_NAME_PATTERN.finditer(name)]
 
 
+# 상품명-옵션값 완전 중복 시 쿠팡이 노출을 낮추는 경향 방지용
+_MODEL_OPT_TYPES = {"모델명/품번", "모델명", "모델", "품번"}
+
+
+def _dedupe_name_option_overlap(name: str, options: list[tuple[str, str]]) -> str:
+    """
+    상품명에 "모델명/품번" 등 옵션값이 정확히 그대로 포함되어 있으면
+    쿠팡이 상품명-옵션 중복으로 판단해 노출을 낮추는 경향이 있음 —
+    옵션값(정확한 모델명, 검색용)은 그대로 두고 상품명 쪽 표기만 살짝 다르게
+    바꿔서 완전 일치를 피한다 (예: "PURITY 450 Quell ST" → "PURITY 450 - Quell ST").
+    """
+    for opt_type, opt_val in options:
+        if opt_type not in _MODEL_OPT_TYPES or not opt_val or opt_val not in name:
+            continue
+        modified = None
+        m = _re.search(r'\d+', opt_val)
+        if m and m.end() < len(opt_val):
+            modified = opt_val[:m.end()] + " -" + opt_val[m.end():]
+        elif " " in opt_val:
+            modified = opt_val.replace(" ", " - ", 1)
+        if modified and modified != opt_val:
+            name = name.replace(opt_val, modified, 1)
+    return name
+
+
 # ── 단일 URL 파이프라인 ───────────────────────────────────────────
 
 async def _process_entry(
@@ -2280,10 +2318,30 @@ async def _process_entry(
                     if _gc_txt:
                         _gc_norm = _gc_txt.lower().replace(" ", "").replace("-", "")
                         _gc_matched = None
-                        for _cat in _gc_cats:
-                            if _cat.get("name", "").lower().replace(" ", "").replace("-", "") == _gc_norm:
-                                _gc_matched = _cat
-                                break
+                        _gc_exact = [
+                            _cat for _cat in _gc_cats
+                            if _cat.get("name", "").lower().replace(" ", "").replace("-", "") == _gc_norm
+                        ]
+                        if len(_gc_exact) == 1:
+                            _gc_matched = _gc_exact[0]
+                        elif len(_gc_exact) > 1:
+                            # 동일 이름 카테고리가 여러 L2에 걸쳐 존재(예: 강아지/고양이 '파우치')
+                            # → 상품명의 종/대상 키워드로 올바른 경로를 우선 선택
+                            _pname_l = product.name.lower()
+                            for _sp_path_kw, _sp_terms in (
+                                ("고양이", ["고양이", "냥이", "캣"]),
+                                ("강아지", ["강아지", "멍멍이", "댕댕이", "puppy"]),
+                            ):
+                                if any(_t in _pname_l for _t in _sp_terms):
+                                    _sp_match = next(
+                                        (c for c in _gc_exact if _sp_path_kw in c.get("path", "")),
+                                        None,
+                                    )
+                                    if _sp_match:
+                                        _gc_matched = _sp_match
+                                        break
+                            if not _gc_matched:
+                                _gc_matched = _gc_exact[0]
                         if not _gc_matched:
                             for _cat in _gc_cats:
                                 _cn = _cat.get("name", "").lower().replace(" ", "").replace("-", "")
@@ -2564,6 +2622,51 @@ async def _process_entry(
         _src_img_path = (_custom_img if _custom_img and Path(_custom_img).exists() else "") or product.local_image_path
         if _custom_img and Path(_custom_img).exists():
             log_(f"[{entry.uid[:6]}] 사용자 지정 대표이미지 사용: {Path(_custom_img).name}")
+
+        # ── 2-A. AI 배경 재생성 (Gemini) — 누끼 어려운 상품용 개별 옵션 ──
+        _ai_regen_used = False
+        if getattr(entry, "ai_bg_regen", False) and _src_img_path and not entry.single_mode:
+            _gk_bg = getattr(_settings, "GEMINI_API_KEY", "")
+            if _gk_bg:
+                # 중량/용량 정확한 값을 미리 파싱해 프롬프트에 전달 —
+                # 원본 사진에서 그람수가 접히거나 흐릿해 Gemini가 추측해서
+                # 다른 숫자를 인쇄하는 사고 방지 (예: 280g → 200g 오인식)
+                _spec_hint_parts = []
+                try:
+                    _wv, _wu, _wg = _parse_weight_from_json(product.raw_json or {})
+                    if _wg <= 0:
+                        _wv, _wu, _wg = _parse_weight(product.name)
+                    if _wg > 0:
+                        _spec_hint_parts.append(f"{_wv:g}{_wu}")
+                except Exception:
+                    pass
+                try:
+                    _vv, _vu, _vl = _parse_volume_from_json(product.raw_json or {})
+                    if _vl <= 0:
+                        _vv, _vu, _vl = _parse_volume(product.name)
+                    if _vl > 0:
+                        _spec_hint_parts.append(f"{_vv:g}{_vu}")
+                except Exception:
+                    pass
+                _spec_hint = " / ".join(_spec_hint_parts)
+
+                log_(f"[{entry.uid[:6]}] AI 배경 재생성 시작 (Gemini)..."
+                     + (f" [중량/용량 힌트: {_spec_hint}]" if _spec_hint else ""))
+                _ai_path = await loop.run_in_executor(
+                    None,
+                    partial(regenerate_background, _src_img_path,
+                            product.product_id, _gk_bg, _settings.IMAGE_AI_DIR,
+                            spec_hint=_spec_hint),
+                )
+                if _ai_path:
+                    _src_img_path = _ai_path
+                    _ai_regen_used = True
+                    log_(f"[{entry.uid[:6]}] AI 배경 재생성 완료: {Path(_ai_path).name}")
+                else:
+                    log_(f"[{entry.uid[:6]}] AI 배경 재생성 실패 — 기존 방식(누끼 {'ON' if use_nobg else 'OFF'})으로 진행")
+            else:
+                log_(f"[{entry.uid[:6]}] GEMINI_API_KEY 미설정 — AI 배경 재생성 스킵")
+
         if _src_img_path and not entry.single_mode:
             try:
                 proc = ImageProcessor(_settings, store=getattr(entry, "watch_store", "샵케이"))
@@ -2571,7 +2674,8 @@ async def _process_entry(
                     None,
                     partial(proc.process, _src_img_path,
                             product.product_id, entry.qtys,
-                            **({"skip_nobg": True} if not use_nobg else {})),
+                            unit_label=getattr(entry, "badge_unit", "개") or "개",
+                            **({"skip_nobg": True} if (not use_nobg or _ai_regen_used) else {})),
                 )
                 log_(f"[{entry.uid[:6]}] 이미지 합성: {len(composed)}개")
             except TypeError:
@@ -2888,6 +2992,8 @@ async def _process_entry(
                         model=_gemini_model,
                         upload_fn=_upload_bytes,
                         product_id=product.product_id,
+                        ref_images=getattr(entry, "detail_ref_images", None) or None,
+                        ref_text=getattr(entry, "detail_ref_text", "") or "",
                     ),
                 )
                 if gemini_img_url:
@@ -3732,6 +3838,12 @@ async def _process_entry(
             if len(extra_options) < _before_final:
                 log_(f"[{entry.uid[:6]}] 최종 안전망: 불허 옵션 {_before_final - len(extra_options)}개 제거")
 
+        # ── 상품명-옵션값(모델명/품번) 완전중복 방지 (쿠팡 노출저하 방지) ──
+        _deduped_name = _dedupe_name_option_overlap(product_name_50, extra_options)
+        if _deduped_name != product_name_50:
+            log_(f"[{entry.uid[:6]}] 상품명-옵션 중복 방지: '{product_name_50}' → '{_deduped_name}'")
+            product_name_50 = _deduped_name
+
         entry.result_item = BulkItem(
             naver_url=entry.url,
             product_name=product_name_50,
@@ -3878,6 +3990,10 @@ def _save_collection_history(
                 "extra_detail_text": getattr(e, "extra_detail_text", ""),
                 "bundle_unit":       getattr(e, "bundle_unit", 0),
                 "custom_image_path": getattr(e, "custom_image_path", ""),
+                "badge_unit":        getattr(e, "badge_unit", "개"),
+                "ai_bg_regen":       getattr(e, "ai_bg_regen", False),
+                "detail_ref_images": list(getattr(e, "detail_ref_images", None) or []),
+                "detail_ref_text":   getattr(e, "detail_ref_text", ""),
             })
 
         if not serialized:
@@ -3950,7 +4066,8 @@ _QUEUE_SAVE_FIELDS = (
     "manual_options", "lead_time",
     "single_mode", "single_selected_imgs", "margin_override",
     "watch_store", "price_extra", "extra_detail_images", "extra_detail_text",
-    "bundle_unit", "custom_image_path",
+    "bundle_unit", "custom_image_path", "badge_unit", "ai_bg_regen",
+    "detail_ref_images", "detail_ref_text",
     "status",  # 복원 시 processing → pending 으로 리셋
 )
 
@@ -4023,6 +4140,10 @@ def _restore_queue_from_state() -> list[QueueEntry]:
                 extra_detail_text   = row.get("extra_detail_text", ""),
                 bundle_unit         = int(row.get("bundle_unit") or 0),
                 custom_image_path   = row.get("custom_image_path", ""),
+                badge_unit          = row.get("badge_unit") or "개",
+                ai_bg_regen         = bool(row.get("ai_bg_regen", False)),
+                detail_ref_images   = list(row.get("detail_ref_images") or []),
+                detail_ref_text     = row.get("detail_ref_text", ""),
                 status           = _st,
             )
             if e.url:
@@ -4323,6 +4444,10 @@ def _naver_to_wing_l1(naver_cat: str) -> str | None:
         _p = _part.strip()
         if _p in _MAP:
             return _MAP[_p]
+    # 정확 매칭 실패 시 포함 여부로 보정 — Gemini L1 추론이 부정확한 특정 품목
+    # (예: 건전지가 '가전/디지털'로 오추론되던 문제, 실제로는 생활용품)
+    if "건전지" in naver_cat or "충전지" in naver_cat:
+        return "생활용품"
     return None
 
 
@@ -4872,14 +4997,14 @@ def _make_nav_header(current: str):
         # 로고
         ui.html('<div class="topbar-logo">🛒 <span>네이버 → 쿠팡</span></div>')
 
-        # ── 네비 버튼: 1단계 → 2단계 묶음 → 가격변동알림 → [spacer] → 재시작
+        # ── 네비 버튼: 1단계 → 가격/재고 수정 → 가격변동알림 → [spacer] → 재시작
         home_cls = "nav-btn nav-btn-home active" if current == "main" else "nav-btn nav-btn-home"
         ui.button("📦 1단계 상품수집", on_click=lambda: ui.navigate.to("/")).classes(home_cls)
 
-        fix_cls = "nav-btn nav-btn-excel active" if current == "error-fix" else "nav-btn nav-btn-excel"
-        ui.button("📗 2단계 엑셀 검수", on_click=lambda: ui.navigate.to("/error-fix")).classes(fix_cls)
+        fix_cls = "nav-btn nav-btn-excel active" if current == "price-fix" else "nav-btn nav-btn-excel"
+        ui.button("💰 가격/재고 수정", on_click=lambda: ui.navigate.to("/price-fix")).classes(fix_cls)
 
-        # 1단계·2단계 묶음과 가격변동알림 사이 구분선
+        # 1단계와 가격변동알림 사이 구분선
         ui.html('<div class="nav-divider"></div>')
 
         mon_cls = "nav-btn nav-btn-alert active" if current == "monitor" else "nav-btn nav-btn-alert"
@@ -4891,9 +5016,6 @@ def _make_nav_header(current: str):
         if sold_n:   alert_label += f" 品{sold_n}"
         if restocked_n: alert_label += f" 🟢{restocked_n}"
         ui.button(alert_label, on_click=lambda: ui.navigate.to("/monitor")).classes(mon_cls)
-
-        pf_cls = "nav-btn nav-btn-pricefix active" if current == "price-fix" else "nav-btn nav-btn-pricefix"
-        ui.button("💰 가격수정", on_click=lambda: ui.navigate.to("/price-fix")).classes(pf_cls)
 
         ui.html('<div class="nav-spacer"></div>')
 
@@ -5603,7 +5725,7 @@ def _build_detail_page_tab(settings) -> None:
     import urllib.request as _urlreq
     from pathlib import Path as _Path
 
-    _MAX_IMAGES  = 5
+    _MAX_IMAGES  = 10
     _IMG_DIR     = _Path(__file__).parent / "data" / "images"
 
     # ── 상태 ─────────────────────────────────────────────────────
@@ -5646,8 +5768,8 @@ def _build_detail_page_tab(settings) -> None:
             dp_img_count_lbl = ui.label("0 / 5").classes("text-xs text-slate-400 font-mono")
 
         ui.label(
-            "전체컷·개별컷 모두 올리세요 — "
-            "히어로/클로즈업은 Gemini 레퍼런스, 특징/스펙 섹션은 실사진 그대로 합성."
+            "스마트스토어 원본 상세페이지 이미지를 그대로 올리세요 — "
+            "올린 이미지 개수만큼 섹션이 생성됩니다 (1장 = 1섹션)."
         ).classes("text-xs text-slate-400 mb-2")
 
         # 썸네일 갤러리
@@ -5745,25 +5867,12 @@ def _build_detail_page_tab(settings) -> None:
     # § 3 — 생성 옵션
     # ══════════════════════════════════════════════════════════════
     with ui.card_section():
-        ui.label("③ 생성 옵션").classes("font-bold text-slate-700 text-sm mb-2")
-        with ui.row().classes("items-center gap-3 flex-wrap"):
-            with ui.row().classes("items-center gap-1"):
-                ui.label("섹션 수").classes("text-xs text-slate-600")
-                dp_section_count = ui.number(
-                    value=4, min=1, step=1,
-                ).props("dense outlined").style("width:60px; font-size:12px;")
-        dp_cost_label = ui.label("4섹션 예정 | Gemini API 4회 호출").classes(
-            "text-xs text-slate-400 mt-1"
-        )
-        with ui.row().classes("items-center gap-2 mt-2"):
-            dp_composite = ui.switch(
-                "실사진 합성 ON (특징·스펙 섹션 실제 사진 배치)",
-                value=True,
-            ).props("color=deep-orange dense")
+        ui.label("③ 생성 방식").classes("font-bold text-slate-700 text-sm mb-2")
         ui.label(
-            "ON: 특징/스펙/사용법 섹션은 AI 배경 + 실사진 PIL 합성 (제품 왜곡 없음)\n"
-            "OFF: 모든 섹션 Gemini 전체 생성"
-        ).classes("text-xs text-slate-400 whitespace-pre-line ml-1 mb-1")
+            "🎯 레퍼런스 기반 재구성 — ②에 올린 실제 상세페이지 이미지를 1장당 1섹션으로 "
+            "그대로 매칭합니다. 정보(수치·스펙)는 그대로 유지하고 문구만 새로 쓰고, "
+            "이미지도 완전히 새로 그려서 원본과 다른 결과물을 만듭니다."
+        ).classes("text-xs text-purple-300 whitespace-pre-line ml-1 mb-1")
 
     # ══════════════════════════════════════════════════════════════
     # § 4 — 실행 / 진행 / 결과
@@ -5776,6 +5885,10 @@ def _build_detail_page_tab(settings) -> None:
             dp_gen_btn = ui.button(
                 "🎨 생성", icon="auto_awesome",
             ).props("color=teal size=md").classes("font-bold")
+            dp_download_btn = ui.button(
+                "⬇ 다운로드", icon="download",
+            ).props("color=green size=md").classes("font-bold")
+            dp_download_btn.set_visibility(False)
             dp_upload_btn = ui.button(
                 "☁️ R2 업로드", icon="cloud_upload",
             ).props("color=indigo size=md outline").classes("font-bold")
@@ -5873,7 +5986,7 @@ def _build_detail_page_tab(settings) -> None:
                 except Exception:
                     pass
         dp_img_status.set_text(
-            f"{n}장 준비됨" if n else "이미지 없음 (AI가 임의 생성)"
+            f"{n}장 준비됨 — {n}섹션 생성 예정" if n else "레퍼런스 이미지를 올려주세요 (최소 1장)"
         )
 
     def _make_del_btn(idx: int):
@@ -5963,30 +6076,11 @@ def _build_detail_page_tab(settings) -> None:
 
     # ── 긴 이미지 감지 + 분할 미리보기 ──────────────────────────
     def _check_long_image(path: str):
-        """추가된 이미지가 긴 이미지인지 확인. 맞으면 분할 미리보기 섹션 표시."""
-        try:
-            from PIL import Image as _PILImg
-            from detail_page import is_long_image, split_long_image
-            img = _PILImg.open(path)
-            if not is_long_image(img):
-                return
-            pieces = split_long_image(path)
-            if len(pieces) <= 1:
-                return
-            _split_state["pieces"]      = pieces
-            _split_state["included"]    = [True] * len(pieces)
-            _split_state["chunk_types"] = ["unknown"] * len(pieces)
-            _split_state["orig_path"]   = path
-            _split_state["saved_paths"] = []
-            _render_split_preview()
-            dp_split_section.set_visibility(True)
-            ui.notify(
-                f"긴 이미지 감지 — {len(pieces)}개 조각으로 분할 미리보기 준비됨. "
-                "[🔍 텍스트 자동 읽기]를 눌러 분류 + 텍스트 추출을 하세요.",
-                type="info", timeout=4000,
-            )
-        except Exception as ex:
-            print(f"[DP] 긴 이미지 감지 오류: {ex}")
+        """
+        [비활성화] 레퍼런스 기반 재구성은 이미지를 쪼개지 않고 1장=1섹션으로
+        그대로 써야 하므로, 긴 이미지 자동 분할 미리보기는 띄우지 않는다.
+        """
+        return
 
     def _render_split_preview():
         pieces      = _split_state["pieces"]
@@ -6117,19 +6211,13 @@ def _build_detail_page_tab(settings) -> None:
                 type="positive", timeout=3000,
             )
 
-        # 섹션 수 자동 설정, 상태 정리
-        dp_section_count.set_value(len(selected))
-        _update_cost_label()
+        # 상태 정리
         dp_split_section.set_visibility(False)
         _split_state["pieces"].clear()
         _split_state["saved_paths"]   = saved_paths
         _split_state["product_paths"] = product_paths
         _split_state["text_paths"]    = text_paths
         _refresh_thumbs()
-
-    def _update_cost_label():
-        n = int(dp_section_count.value or 4)
-        dp_cost_label.set_text(f"{n}섹션 예정 | Gemini API {n}회 호출")
 
     async def _read_texts_from_split():
         """
@@ -6227,10 +6315,7 @@ def _build_detail_page_tab(settings) -> None:
 
     dp_read_btn.on_click(_read_texts_from_split)
 
-    dp_section_count.on_value_change(lambda _: _update_cost_label())
-    _update_cost_label()
-
-    # ── 생성 버튼 ─────────────────────────────────────────────────
+    # ── 생성 버튼 (레퍼런스 기반 재구성 고정) ───────────────────────
     async def _on_generate():
         if _dp_state["running"]:
             ui.notify("이미 생성 중입니다.", type="warning", timeout=2000)
@@ -6243,31 +6328,17 @@ def _build_detail_page_tab(settings) -> None:
         if not api_key:
             ui.notify("GEMINI_API_KEY 환경변수가 설정되지 않았습니다.", type="negative", timeout=4000)
             return
-
-        specs: dict[str, str] = {}
-        for line in (dp_specs_input.value or "").splitlines():
-            if ":" in line:
-                k, _, v = line.partition(":")
-                k, v    = k.strip(), v.strip()
-                if k and v:
-                    specs[k] = v
-
-        section_count = int(dp_section_count.value or 4)
-        # 제품 레퍼런스 풀 우선 사용 (분류된 경우) — 없으면 전체 image_paths 폴백
-        product_refs  = _dp_state.get("product_ref_paths") or []
-        image_paths   = product_refs if product_refs else list(_dp_state["image_paths"])
-        use_composite = dp_composite.value
-
-        if not product_refs and _dp_state["image_paths"]:
+        if not _dp_state["image_paths"]:
             ui.notify(
-                "제품 레퍼런스 분류 없이 생성합니다. "
-                "[🔍 텍스트 자동 읽기]로 분류하면 품질이 향상됩니다.",
-                type="info", timeout=3000,
+                "레퍼런스 이미지가 최소 1장 필요합니다. ②에 실제 상세페이지 이미지를 올리세요.",
+                type="warning", timeout=3000,
             )
+            return
 
         _dp_state["running"]     = True
         _dp_state["result_path"] = ""
         _dp_state["result_url"]  = ""
+        dp_download_btn.set_visibility(False)
         dp_upload_btn.set_visibility(False)
         dp_result_url_label.set_text("")
         dp_preview_img.style("display:none")
@@ -6281,19 +6352,16 @@ def _build_detail_page_tab(settings) -> None:
             dp_progress_bar.set_value(cur / max(total, 1))
 
         try:
-            from detail_page import generate_detail_page as _gen_dp
+            from detail_page import generate_detail_page_from_reference as _gen_dp_ref
             loop        = _asyncio.get_running_loop()
             result_path = await loop.run_in_executor(
                 None,
                 _functools.partial(
-                    _gen_dp,
-                    product_name  = product_name,
-                    specs         = specs,
-                    image_paths   = image_paths,
-                    section_count = section_count,
-                    api_key       = api_key,
-                    use_composite = use_composite,
-                    progress_cb   = _progress_cb,
+                    _gen_dp_ref,
+                    reference_image_paths = list(_dp_state["image_paths"]),
+                    product_name          = product_name,
+                    api_key               = api_key,
+                    progress_cb           = _progress_cb,
                 ),
             )
             if result_path:
@@ -6305,6 +6373,7 @@ def _build_detail_page_tab(settings) -> None:
                     "width:100%; max-height:600px; object-fit:contain; display:block"
                 )
                 dp_preview_label.set_text(f"생성 완료 — {_Path(result_path).name}")
+                dp_download_btn.set_visibility(True)
                 dp_upload_btn.set_visibility(True)
                 dp_progress_bar.set_value(1.0)
                 ui.notify("상세페이지 이미지 생성 완료!", type="positive", timeout=3000)
@@ -6320,6 +6389,16 @@ def _build_detail_page_tab(settings) -> None:
             dp_progress_bar.set_visibility(False)
 
     dp_gen_btn.on_click(_on_generate)
+
+    # ── 로컬 다운로드 ─────────────────────────────────────────────
+    def _on_download():
+        result_path = _dp_state.get("result_path", "")
+        if not result_path or not _Path(result_path).is_file():
+            ui.notify("먼저 상세페이지 이미지를 생성하세요.", type="warning", timeout=2000)
+            return
+        ui.download(result_path)
+
+    dp_download_btn.on_click(_on_download)
 
     # ── R2 업로드 ─────────────────────────────────────────────────
     async def _on_r2_upload():
@@ -6347,416 +6426,6 @@ def _build_detail_page_tab(settings) -> None:
             dp_upload_btn.props(remove="disabled loading")
 
     dp_upload_btn.on_click(_on_r2_upload)
-
-
-# ── 오류 엑셀 수정 페이지 ────────────────────────────────────────
-
-@ui.page("/error-fix")
-async def page_error_fix() -> None:
-    _add_common_head()
-
-    # ── 페이지 로컬 상태 ─────────────────────────────────────────
-    _st: dict = {
-        "src_path":    None,   # 업로드된 임시 파일 경로
-        "col_map":     None,   # 열 인덱스 매핑
-        "src_ext":     ".xlsx",
-        "header_row":  2,
-        "products":    [],     # parse_excel 결과
-        "fix_results": [],     # list[FixResult]
-        "processing":  False,
-    }
-    _CAT_OPTS_PATH = Path("config/category_options.json")
-
-    with ui.element("div").props("id=page-wrap"):
-        _make_nav_header("error-fix")
-        ui.separator()
-
-        with ui.element("div").classes("p-4 max-w-6xl mx-auto w-full"):
-            ui.label("📗 엑셀수정").classes("text-2xl font-bold text-slate-800 mb-1")
-            ui.label(
-                "Wing 일괄등록 엑셀 업로드 → Gemini 카테고리·브랜드 오매핑 감지·수정 + 중복 옵션 행 자동 삭제 + 필수 옵션 누락 검사"
-            ).classes("text-sm text-slate-500 mb-4")
-
-            # ── ① 파일 업로드 ─────────────────────────────────
-            with ui.card().classes("shadow-sm w-full mb-4"):
-                with ui.card_section():
-                    ui.label("① 파일 업로드").classes("font-bold text-slate-700 text-sm mb-2")
-                    file_label = ui.label("⚠️ 파일이 서버에 없습니다 — 아래에서 파일을 선택하면 자동 업로드됩니다").classes("text-xs text-orange-500 font-semibold mb-2 block")
-
-                    _upload_ref: dict = {"el": None}
-
-                    async def _on_upload(e):
-                        import tempfile as _tf
-                        _fname = getattr(e.file, "name", None) or getattr(e, "name", "upload")
-                        suffix = Path(_fname).suffix.lower() or ".xlsx"
-                        tmp = _tf.NamedTemporaryFile(
-                            delete=False, suffix=suffix, dir=str(_OUTPUT_ROOT)
-                        )
-                        if hasattr(e, "file") and e.file is not None:
-                            tmp.write(await e.file.read())
-                        else:
-                            tmp.write(e.content.read())
-                        tmp.close()
-                        src_path = Path(tmp.name)
-                        try:
-                            from modules.excel_fixer import parse_excel
-                            loop = asyncio.get_running_loop()
-                            col_map, src_ext, products, header_row = await loop.run_in_executor(
-                                None, lambda: parse_excel(src_path)
-                            )
-                            _st.update(
-                                src_path=src_path, col_map=col_map, src_ext=src_ext,
-                                header_row=header_row, products=products,
-                                fix_results=[],
-                            )
-                            file_label.set_text(f"✅ {_fname} — {len(products)}개 고유 상품 감지")
-                            file_label.classes(remove="text-slate-400 text-red-500 text-orange-500")
-                            file_label.classes(add="text-green-600 font-semibold")
-                        except Exception as ex:
-                            file_label.set_text(f"❌ 파싱 실패: {ex}")
-                            file_label.classes(remove="text-slate-400 text-green-600 text-orange-500")
-                            file_label.classes(add="text-red-500")
-                            _st.pop("src_path", None)
-                        results_area.clear()
-                        dl_btn.set_enabled(False)
-
-                    _upload_ref["el"] = ui.upload(
-                        label="📁 .xlsx / .xlsm 선택 (선택 즉시 자동 업로드)",
-                        on_upload=_on_upload,
-                        auto_upload=True,
-                        multiple=False,
-                    ).props("accept=.xlsx,.xlsm,.xls flat dense color=primary")
-                    ui.label("앱 재시작 후에는 파일을 다시 선택해야 합니다 (서버에 파일이 남아있지 않음)").classes("text-xs text-slate-400 mt-1")
-
-            # ── ② Gemini 검수 ─────────────────────────────────
-            with ui.card().classes("shadow-sm w-full mb-4"):
-                with ui.card_section():
-                    ui.label("② Gemini 검수 실행").classes("font-bold text-slate-700 text-sm mb-2")
-
-                    prog_label = ui.label("").classes("text-xs text-slate-500 mb-1 block")
-                    prog_bar   = ui.linear_progress(value=0).props("color=primary instant-feedback")
-                    prog_bar.set_visibility(False)
-
-                    async def _on_start():
-                        if _st.get("processing"):
-                            return
-                        if not _st.get("src_path"):
-                            ui.notify("파일을 다시 선택해주세요 — 앱 재시작 후에는 업로드 UI에 파일이 보여도 서버에 파일이 없습니다. + 버튼으로 재선택하세요.", type="warning", timeout=6000)
-                            return
-                        products = _st.get("products", [])
-                        if not products:
-                            ui.notify("파일을 다시 업로드하세요 (상품 데이터 없음)", type="warning")
-                            return
-
-                        _st["processing"] = True
-                        start_btn.set_enabled(False)
-                        start_btn.set_text("⏳ 검수 중...")
-                        results_area.clear()
-                        dl_btn.set_enabled(False)
-                        prog_bar.set_visibility(True)
-                        prog_bar.set_value(0)
-                        prog_label.set_text("분석 시작...")
-
-                        from modules.excel_fixer import gemini_check, FixResult, check_options
-                        _det     = _get_detector()
-                        _api_key = getattr(_settings, "GEMINI_API_KEY", "")
-                        _model   = getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash")
-                        loop     = asyncio.get_running_loop()
-
-                        # ① 옵션 검증 (Gemini 불필요, 즉시 실행)
-                        prog_label.set_text("옵션 중복 및 필수 옵션 검사 중...")
-                        products = await loop.run_in_executor(
-                            None,
-                            lambda: check_options(products, _CAT_OPTS_PATH),
-                        )
-
-                        total    = len(products)
-                        fix_results: list[FixResult] = []
-                        # brand_map 로드 (수집 파이프라인의 사용자 수정 이력)
-                        _bmap = _load_brand_map()
-
-                        def _apply_bmap(brand: str) -> str:
-                            if not brand or not _bmap:
-                                return brand
-                            bl = brand.strip().lower()
-                            for k, v in _bmap.items():
-                                if k.strip().lower() == bl:
-                                    return v
-                            return brand
-
-                        for i, prod in enumerate(products):
-                            prod["_cat_name"] = _det.get_name_by_id(prod["category_id"])
-                            _missing_opts = prod.get("missing_required_opts", [])
-                            prog_label.set_text(
-                                f"[{i+1}/{total}] {prod['product_name'][:45]}"
-                            )
-
-                            if _api_key:
-                                g = await loop.run_in_executor(
-                                    None,
-                                    lambda p=dict(prod), mo=list(_missing_opts):
-                                        gemini_check(p, _api_key, _model, missing_opts=mo),
-                                )
-                            else:
-                                g = {"needs_fix": False, "category_keyword": "",
-                                     "brand": prod["brand"], "reason": "GEMINI_API_KEY 미설정",
-                                     "option_values": {}}
-
-                            new_cat_id   = prod["category_id"]
-                            new_cat_name = prod["_cat_name"]
-                            new_gosisi   = ""
-
-                            if g.get("needs_fix") and g.get("category_keyword"):
-                                found = _det.search_by_keyword(g["category_keyword"])
-                                if found:
-                                    new_cat_id, new_gosisi, new_cat_name = found
-
-                            # 브랜드: brand_map 우선 → Gemini 제안 → 원본 유지
-                            raw_gemini_brand  = (g.get("brand") or prod["brand"]).strip()
-                            bmap_of_orig      = _apply_bmap(prod["brand"])
-                            bmap_of_gemini    = _apply_bmap(raw_gemini_brand)
-                            if bmap_of_orig != prod["brand"]:
-                                new_brand = bmap_of_orig        # 수집 파이프라인 수정 이력 우선
-                            elif bmap_of_gemini != raw_gemini_brand:
-                                new_brand = bmap_of_gemini      # Gemini 제안이 brand_map에 매핑됨
-                            else:
-                                new_brand = raw_gemini_brand or prod["brand"]
-
-                            # 누락 필수 옵션 Gemini 추정값 (option_values 필드)
-                            raw_opt_vals: dict = g.get("option_values") or {}
-                            # missing_opts에 있는 타입만 채택
-                            missing_opt_values = {
-                                k: str(v) for k, v in raw_opt_vals.items()
-                                if k in _missing_opts and v
-                            }
-
-                            cat_chg    = new_cat_id != prod["category_id"]
-                            brand_chg  = new_brand.lower() != (prod["brand"] or "").lower()
-                            opt_issues = prod.get("has_option_issues", False)
-                            needs_fix  = g.get("needs_fix", False) or cat_chg or brand_chg or opt_issues
-
-                            fix_results.append(FixResult(
-                                product_name          = prod["product_name"],
-                                old_category_id       = prod["category_id"],
-                                old_category_name     = prod["_cat_name"],
-                                new_category_id       = new_cat_id,
-                                new_category_name     = new_cat_name,
-                                new_gosisi_cat        = new_gosisi,
-                                old_brand             = prod["brand"],
-                                new_brand             = new_brand,
-                                needs_fix             = needs_fix,
-                                reason                = g.get("reason", ""),
-                                row_indices           = prod["row_indices"],
-                                dup_rows              = prod.get("dup_rows", []),
-                                invalid_option_types  = prod.get("invalid_option_types", []),
-                                missing_required_opts = _missing_opts,
-                                missing_opt_values    = missing_opt_values,
-                                has_option_issues     = opt_issues,
-                            ))
-                            prog_bar.set_value((i + 1) / total)
-
-                        _st["fix_results"] = fix_results
-                        _st["processing"]  = False
-                        changed_cnt = sum(1 for fr in fix_results if fr.needs_fix)
-                        prog_label.set_text(
-                            f"완료 — 전체 {total}개 중 {changed_cnt}개 수정 필요"
-                        )
-                        start_btn.set_enabled(True)
-                        start_btn.set_text("🔍 검수 시작")
-                        _render_results(fix_results)
-                        if fix_results:
-                            dl_btn.set_enabled(True)
-
-                    start_btn = ui.button(
-                        "🔍 검수 시작", icon="search", on_click=_on_start
-                    ).props("color=primary").classes("mt-2")
-
-            # ── ③ 변경 사항 미리보기 ─────────────────────────
-            with ui.card().classes("shadow-sm w-full mb-4"):
-                with ui.card_section():
-                    with ui.row().classes("items-center justify-between mb-2"):
-                        ui.label("③ 변경 사항 미리보기").classes("font-bold text-slate-700 text-sm")
-                        ui.label("브랜드 락 ON → 해당 브랜드 변경 차단").classes("text-xs text-slate-400")
-
-                    # 테이블 헤더
-                    with ui.row().classes(
-                        "w-full bg-slate-100 rounded px-2 py-1 gap-2 text-xs font-bold text-slate-600"
-                    ):
-                        ui.label("상품명").style("flex:2; min-width:0")
-                        ui.label("카테고리 변경 (ID / 카테고리명)").style("flex:2; min-width:0")
-                        ui.label("브랜드 변경").style("flex:1; min-width:0")
-                        ui.label("이유").style("flex:1; min-width:0")
-                        ui.label("브랜드 락").classes("w-20 text-center")
-
-                    results_area = ui.column().classes("w-full gap-0")
-
-            # ── ④ 다운로드 ─────────────────────────────────────
-            with ui.card().classes("shadow-sm w-full"):
-                with ui.card_section():
-                    ui.label("④ 수정 엑셀 다운로드").classes("font-bold text-slate-700 text-sm mb-2")
-                    ui.label(
-                        "카테고리·브랜드 수정 + 중복 옵션 행 삭제가 적용된 새 엑셀을 저장합니다. 브랜드 락 ON 항목은 브랜드 변경 차단."
-                    ).classes("text-xs text-slate-400 mb-2")
-
-                    async def _on_download():
-                        if not _st.get("src_path") or not _st.get("fix_results"):
-                            ui.notify("먼저 검수를 실행하세요.", type="warning")
-                            return
-                        from modules.excel_fixer import apply_and_save
-                        dl_btn.set_enabled(False)
-                        dl_btn.set_text("⏳ 저장 중...")
-                        try:
-                            loop = asyncio.get_running_loop()
-                            out_path = await loop.run_in_executor(
-                                None,
-                                lambda: apply_and_save(
-                                    _st["src_path"],
-                                    _st["col_map"],
-                                    _st["fix_results"],
-                                    _OUTPUT_ROOT,
-                                    _st.get("src_ext", ".xlsx"),
-                                ),
-                            )
-                            ui.notify(f"✅ 저장 완료: {out_path.name}", type="positive")
-                            ui.download(str(out_path))
-                        except Exception as ex:
-                            ui.notify(f"❌ 저장 오류: {ex}", type="negative")
-                        finally:
-                            dl_btn.set_enabled(True)
-                            dl_btn.set_text("⬇ 수정 엑셀 다운로드")
-
-                    dl_btn = ui.button(
-                        "⬇ 수정 엑셀 다운로드", icon="download", on_click=_on_download
-                    ).props("color=green")
-                    dl_btn.set_enabled(False)
-
-    # ── 결과 렌더링 함수 ───────────────────────────────────────────
-    def _render_results(fix_results: list) -> None:
-        from modules.excel_fixer import FixResult
-        results_area.clear()
-        if not fix_results:
-            with results_area:
-                ui.label("검수 결과 없음").classes("text-sm text-slate-400 p-2")
-            return
-
-        changed_cnt   = sum(1 for fr in fix_results if fr.needs_fix)
-        dup_total     = sum(len(fr.dup_rows) for fr in fix_results)
-        opt_issue_cnt = sum(1 for fr in fix_results if fr.has_option_issues)
-
-        with results_area:
-            # 요약 배너
-            if changed_cnt:
-                summary_parts = [f"수정 필요 {changed_cnt}개 / 정상 {len(fix_results) - changed_cnt}개"]
-                if dup_total:
-                    summary_parts.append(f"중복 옵션 행 {dup_total}개 삭제 예정")
-                if opt_issue_cnt:
-                    summary_parts.append(f"옵션 이슈 {opt_issue_cnt}개 상품")
-                ui.label("⚠️ " + " | ".join(summary_parts)).classes(
-                    "text-xs font-bold text-amber-600 px-2 py-1"
-                )
-            else:
-                ui.label("✅ 모든 상품 카테고리·브랜드·옵션 정상").classes(
-                    "text-xs font-bold text-green-600 px-2 py-1"
-                )
-
-            # 테이블 헤더
-            with ui.row().classes(
-                "w-full bg-slate-100 rounded px-2 py-1 gap-2 text-xs font-bold text-slate-600 mt-1"
-            ):
-                ui.label("상품명").style("flex:2; min-width:0")
-                ui.label("카테고리").style("flex:2; min-width:0")
-                ui.label("브랜드").style("flex:1; min-width:0")
-                ui.label("옵션 이슈").style("flex:2; min-width:0")
-                ui.label("이유").style("flex:1; min-width:0")
-                ui.label("브랜드락").classes("w-20 text-center")
-
-            for fr in fix_results:
-                cat_chg   = fr.new_category_id != fr.old_category_id
-                brand_chg = fr.new_brand != fr.old_brand
-                row_bg    = "background:#fffbeb" if fr.needs_fix else "background:#f8fafc"
-
-                with ui.row().classes(
-                    "w-full rounded px-2 py-1 gap-2 items-start border-b border-slate-100 text-xs"
-                ).style(row_bg):
-                    # 상품명 + 행 수
-                    with ui.column().style("flex:2; min-width:0; gap:1px"):
-                        ui.label(fr.product_name[:45]).style(
-                            "word-break:break-all; color:#374151"
-                        )
-                        ui.label(f"총 {len(fr.row_indices)}행").style("color:#9ca3af; font-size:10px")
-
-                    # 카테고리 변경
-                    with ui.column().style("flex:2; min-width:0; gap:1px"):
-                        if cat_chg:
-                            ui.label(
-                                f"전: {fr.old_category_id} {fr.old_category_name[:14]}"
-                            ).style("color:#ef4444; text-decoration:line-through")
-                            ui.label(
-                                f"후: {fr.new_category_id} {fr.new_category_name[:14]}"
-                            ).style("color:#16a34a; font-weight:600")
-                        else:
-                            ui.label(
-                                f"{fr.old_category_id} {fr.old_category_name[:18]}"
-                            ).style("color:#9ca3af")
-
-                    # 브랜드 변경
-                    with ui.column().style("flex:1; min-width:0; gap:1px"):
-                        if brand_chg:
-                            ui.label(f"전: {fr.old_brand}").style(
-                                "color:#ef4444; text-decoration:line-through"
-                            )
-                            ui.label(f"후: {fr.new_brand}").style(
-                                "color:#16a34a; font-weight:600"
-                            )
-                        else:
-                            ui.label(fr.old_brand or "-").style("color:#9ca3af")
-
-                    # 옵션 이슈
-                    with ui.column().style("flex:2; min-width:0; gap:2px"):
-                        if fr.dup_rows:
-                            ui.label(f"🗑 중복 {len(fr.dup_rows)}행 삭제").style(
-                                "color:#dc2626; font-weight:600"
-                            )
-                        if fr.invalid_option_types:
-                            ui.label(f"⚠ 잘못된 옵션타입: {', '.join(fr.invalid_option_types[:3])}").style(
-                                "color:#d97706"
-                            )
-                        if fr.missing_required_opts:
-                            if fr.missing_opt_values:
-                                # Gemini가 값 추정한 경우
-                                for opt_t, opt_v in fr.missing_opt_values.items():
-                                    ui.label(f"➕ {opt_t}={opt_v} 행 추가").style(
-                                        "color:#7c3aed; font-weight:600"
-                                    )
-                                no_val = [o for o in fr.missing_required_opts
-                                          if o not in fr.missing_opt_values]
-                                if no_val:
-                                    ui.label(f"❗ 값 미추정: {', '.join(no_val[:3])}").style(
-                                        "color:#dc2626"
-                                    )
-                            else:
-                                ui.label(f"❗ 누락 필수옵션: {', '.join(fr.missing_required_opts[:3])}").style(
-                                    "color:#7c3aed"
-                                )
-                        if not fr.has_option_issues:
-                            ui.label("✓ 정상").style("color:#9ca3af")
-
-                    # 이유
-                    ui.label(fr.reason or "-").style("flex:1; min-width:0; color:#6b7280")
-
-                    # 브랜드 락 토글
-                    with ui.element("div").classes("w-20 flex justify-center"):
-                        if brand_chg:
-                            def _make_lock(fix_result: FixResult):
-                                sw = ui.switch(
-                                    "",
-                                    value=fix_result.brand_locked,
-                                    on_change=lambda e, fr=fix_result: setattr(fr, "brand_locked", e.value),
-                                ).props("dense")
-                                return sw
-                            _make_lock(fr)
-                        else:
-                            ui.label("-").style("color:#d1d5db; text-align:center")
 
 
 # ── 메인 페이지 ──────────────────────────────────────────────────
@@ -6811,7 +6480,7 @@ def page() -> None:
                 # ── 좌측 패널 탭 ─────────────────────────────────────────
                 with ui.tabs().props("dense").classes("w-full") as _mode_tabs:
                     _tab_m      = ui.tab("📦 다중 등록")
-                    _tab_detail = ui.tab("🖼 상세페이지 생성").set_visibility(False)
+                    _tab_detail = ui.tab("🖼 상세페이지 생성")
                 with ui.tab_panels(_mode_tabs, value=_tab_m).classes("w-full p-0"):
                     with ui.tab_panel(_tab_m).classes("p-0"):
 
@@ -6965,6 +6634,14 @@ def page() -> None:
                             default_vol      = type("_V", (), {"value": 0})()       # 하위 참조 호환용 더미
                             default_vol_unit = type("_U", (), {"value": "L"})()     # 하위 참조 호환용 더미
 
+                            # 대표이미지 배지 단위 (개/세트/박스/묶음)
+                            with ui.row().classes("items-center gap-2 mt-1"):
+                                ui.label("🏷 대표이미지 배지 단위").classes("text-xs text-slate-400")
+                                badge_unit_select = ui.select(
+                                    ["개", "세트", "박스", "묶음"],
+                                    value="개",
+                                ).props("dense outlined").style("width:90px")
+
                             # 목록 전체 적용
                             def _apply_qty_to_all():
                                 if qty_mode.value == "range":
@@ -6978,15 +6655,17 @@ def page() -> None:
                                 else:
                                     new_qtys = sorted(q for q, cb in _qty_checks.items() if cb.value) or [1]
                                     new_min  = new_qtys[0]
+                                _unit = badge_unit_select.value or "개"
                                 updated = 0
                                 for _e in queue:
                                     if _e.status == "pending":
                                         _e.qtys = new_qtys[:]
                                         _e.min_qty = new_min
                                         _e.qty_locked = False
+                                        _e.badge_unit = _unit
                                         updated += 1
                                 _render_queue()
-                                ui.notify(f"✅ {updated}개 항목에 수량 {new_min}~{max(new_qtys)}개 적용됨",
+                                ui.notify(f"✅ {updated}개 항목에 수량 {new_min}~{max(new_qtys)}{_unit} 적용됨",
                                           type="positive", timeout=2500)
                             ui.button("📋 목록 전체 적용", icon="playlist_add_check",
                                       on_click=_apply_qty_to_all).props(
@@ -7024,7 +6703,8 @@ def page() -> None:
                                 else:
                                     picked = sorted(q for q, cb in _qty_checks.items() if cb.value)
                                     lbl = f"{picked}개 선택" if picked else "미선택"
-                                _s2_sum_lbl.set_text(f"수량 {lbl}")
+                                _u = badge_unit_select.value or "개"
+                                _s2_sum_lbl.set_text(f"수량 {lbl}" + (f" · 배지 단위: {_u}" if _u != "개" else ""))
                                 _s2_body.set_visibility(False)
                                 _s2_next_row.set_visibility(False)
                                 _s2_summary.set_visibility(True)
@@ -7117,6 +6797,15 @@ def page() -> None:
                                 else:
                                     nobg_hint.set_text("원본 이미지 그대로 사용 (배경 제거 안 함)")
                             nobg_toggle.on_value_change(_update_nobg_hint)
+
+                            ui.separator().classes("my-2")
+                            ai_bg_toggle = ui.checkbox(
+                                "🎨 AI 배경 재생성 사용 (Gemini)", value=False,
+                            ).props("dense")
+                            ui.label(
+                                "워터마크·공식배지·마트사진 등 누끼 어려운 상품용. "
+                                "상품당 API 비용·시간 추가 발생 — 켜면 이 상품은 누끼 대신 AI가 배경을 새로 생성함."
+                            ).classes("text-xs text-slate-500 mt-1")
                         _s_nobg_body.set_visibility(False)
 
                         with ui.card_section().classes("py-1") as _s_nobg_summary:
@@ -7328,6 +7017,8 @@ def page() -> None:
                                             source_file  = _fname or "",
                                             lead_time    = 10 if shipping_mode.value == "overseas" else 2,
                                             watch_store  = _main_store_sel.value or "샵케이",
+                                            badge_unit   = badge_unit_select.value or "개",
+                                            ai_bg_regen  = bool(ai_bg_toggle.value),
                                         ))
                                         added += 1
 
@@ -7415,9 +7106,9 @@ def page() -> None:
                             )
                     _s4_body.set_visibility(False)
 
-                    # ── 상세페이지 생성 탭 패널 (비활성) ─────────────
+                    # ── 상세페이지 생성 탭 패널 ────────────────────────
                     with ui.tab_panel(_tab_detail).classes("p-0"):
-                        pass
+                        _build_detail_page_tab(_settings)
 
                 # ── 최근 수집목록 카드 ─────────────────────────────
                 with ui.card().classes("shadow-sm w-full"):
@@ -7449,6 +7140,57 @@ def page() -> None:
                                 "font-bold text-slate-700"
                             )
                             with ui.row().classes("gap-1 items-center"):
+                                # ── 최근 엑셀 생성목록 (재다운로드) ──────────────
+                                with ui.dialog() as _recent_xlsx_dlg, ui.card().classes("w-96"):
+                                    ui.label("📁 최근 생성 엑셀 목록").classes("text-base font-bold mb-1")
+                                    _recent_xlsx_col = ui.column().classes("w-full gap-0")
+                                    def _refresh_recent_xlsx():
+                                        _recent_xlsx_col.clear()
+                                        _xfiles = sorted(
+                                            list(_OUTPUT_ROOT.glob("*.xlsx")) + list(_OUTPUT_ROOT.glob("*.xlsm")),
+                                            key=lambda p: p.stat().st_mtime,
+                                            reverse=True,
+                                        )[:20]
+                                        import datetime as _dtxr
+                                        with _recent_xlsx_col:
+                                            if not _xfiles:
+                                                ui.label("아직 생성된 엑셀이 없습니다.").classes(
+                                                    "text-xs text-slate-500 py-2"
+                                                )
+                                            else:
+                                                for _xf in _xfiles:
+                                                    _xsz = _xf.stat().st_size // 1024
+                                                    _xmt = _dtxr.datetime.fromtimestamp(
+                                                        _xf.stat().st_mtime
+                                                    ).strftime("%m/%d %H:%M")
+                                                    with ui.row().classes(
+                                                        "items-center w-full py-1 border-b border-slate-700"
+                                                    ):
+                                                        ui.label(
+                                                            f"📄 {_xf.name[:36]}{'…' if len(_xf.name) > 36 else ''}"
+                                                        ).classes("text-xs text-slate-400 flex-1")
+                                                        ui.label(f"{_xmt} {_xsz}KB").classes(
+                                                            "text-xs text-slate-500 whitespace-nowrap mx-2"
+                                                        )
+                                                        ui.button(
+                                                            icon="download",
+                                                            on_click=lambda p=_xf: ui.download(str(p)),
+                                                        ).props("flat dense round size=xs color=teal").tooltip(
+                                                            "이 엑셀 파일 다운로드"
+                                                        )
+                                    ui.button("닫기", on_click=_recent_xlsx_dlg.close).props(
+                                        "flat dense color=grey"
+                                    ).classes("mt-2")
+
+                                def _open_recent_xlsx():
+                                    _refresh_recent_xlsx()
+                                    _recent_xlsx_dlg.open()
+                                ui.button("📁 최근 엑셀", icon="history",
+                                    on_click=_open_recent_xlsx,
+                                ).props("flat dense size=md color=grey-6").tooltip(
+                                    "최근 생성된 엑셀 파일 목록 — 재다운로드 가능"
+                                )
+
                                 async def _on_reset_queue():
                                     # 수집 중 경고
                                     if _global_running["v"]:
@@ -8141,6 +7883,10 @@ def page() -> None:
                                     if (_ed.get("custom_image_path") and Path(_ed.get("custom_image_path", "")).exists())
                                     else ""
                                 ),  # 파일이 실제로 존재할 때만 복원 (삭제됐거나 없으면 네이버 원본 사용)
+                                badge_unit          = _ed.get("badge_unit") or "개",
+                                ai_bg_regen         = bool(_ed.get("ai_bg_regen", False)),
+                                detail_ref_images   = list(_ed.get("detail_ref_images") or []),
+                                detail_ref_text     = _ed.get("detail_ref_text", ""),
                             )
                             queue.append(_new_e)
                             _added += 1
@@ -8605,6 +8351,19 @@ def page() -> None:
                                     _make_nobg_handler()
                                 )
 
+                                def _make_ai_bg_handler(e_ref=entry):
+                                    def _h(ev):
+                                        e_ref.ai_bg_regen = (ev.value == "on")
+                                    return _h
+                                ui.toggle(
+                                    {"on": "🎨 AI배경 ON", "off": "AI배경 OFF"},
+                                    value="on" if getattr(entry, "ai_bg_regen", False) else "off",
+                                ).props("dense").classes("text-xs").tooltip(
+                                    "켜면 이 상품은 누끼 대신 Gemini AI가 배경을 새로 생성 (워터마크/공식배지 제거 포함)"
+                                ).on_value_change(
+                                    _make_ai_bg_handler()
+                                )
+
                             _uid = entry.uid
 
                             # ── 추가자료(이미지/텍스트) 버튼 ─────────────────
@@ -8867,6 +8626,267 @@ def page() -> None:
                                     icon="close",
                                     on_click=_make_clear_extra_handler(),
                                 ).props("flat dense round size=sm color=red").tooltip("추가자료 전체 삭제")
+
+                            # ── 정확한 정보 참고자료(이미지/텍스트) 버튼 ──────────
+                            # 고객에게는 안 보임 — Gemini 판매멘트 생성 시 정확한 스펙
+                            # (용량 L, 호환기기 등)을 확인시키는 용도. 정수필터처럼
+                            # raw_json만으로는 Gemini가 수치를 추측해 오답을 내는 상품용.
+                            def _make_detail_ref_handler(e_ref=entry):
+                                async def _h():
+                                    _cur_imgs = list(getattr(e_ref, "detail_ref_images", None) or [])
+                                    _cur_txt  = getattr(e_ref, "detail_ref_text", "") or ""
+                                    with ui.dialog() as _dlg3, ui.card().classes("p-4").style("min-width:420px; max-width:600px"):
+                                        ui.label("🎯 정확한 정보 참고자료").classes(
+                                            "text-base font-bold text-slate-700 mb-1"
+                                        )
+                                        ui.label(
+                                            "고객에게는 안 보입니다. 스마트스토어 상세페이지의 사용량(L)·호환기기 등 "
+                                            "스펙 이미지/텍스트를 넣으면, Gemini가 판매멘트 만들 때 추측하지 않고 "
+                                            "이 자료를 최우선으로 참고합니다."
+                                        ).classes("text-xs text-slate-500 mb-3")
+
+                                        ui.label("참고 이미지 URL (한 줄에 하나씩)").classes("text-xs font-semibold text-slate-600")
+                                        _ref_img_ta = ui.textarea(
+                                            value="\n".join(_cur_imgs),
+                                            placeholder="https://shop-phinf.pstatic.net/...\nhttps://...",
+                                        ).props("dense outlined rows=4").style("width:100%; font-size:11px")
+
+                                        ui.separator().classes("my-2")
+
+                                        async def _on_ref_file_upload(ev):
+                                            try:
+                                                if hasattr(ev, "file") and ev.file is not None:
+                                                    _fb = await ev.file.read()
+                                                    _fname_orig = getattr(ev.file, "name", "") or getattr(ev, "name", "img.jpg")
+                                                else:
+                                                    _fb = ev.content.read()
+                                                    _fname_orig = getattr(ev, "name", "img.jpg")
+                                                _ext = (_fname_orig.rsplit(".", 1)[-1] or "jpg").lower()
+                                                _mime = "image/png" if _ext == "png" else "image/webp" if _ext == "webp" else "image/jpeg"
+                                                _fname2 = f"{e_ref.uid}_ref_{len((_ref_img_ta.value or '').splitlines())}.{_ext}"
+                                                import asyncio as _aio4
+                                                _loop4 = _aio4.get_running_loop()
+                                                from modules.image_uploader import _do_upload as _r2up4
+                                                _up_url = await _loop4.run_in_executor(
+                                                    None, lambda: _r2up4(_fb, _fname2, _mime)
+                                                )
+                                                if _up_url:
+                                                    _cur = (_ref_img_ta.value or "").strip()
+                                                    _ref_img_ta.set_value((_cur + "\n" + _up_url).strip())
+                                                    ui.notify("이미지 업로드 완료", type="positive", timeout=2000)
+                                                else:
+                                                    ui.notify("업로드 실패", type="negative")
+                                            except Exception as _ue:
+                                                ui.notify(f"업로드 오류: {_ue}", type="negative")
+
+                                        ui.label("이미지 붙여넣기 / 드래그&드롭 / 파일 업로드").classes("text-xs font-semibold text-slate-600 mb-1")
+                                        _ref_paste_zone_id = f"pzref_{e_ref.uid}"
+                                        ui.html(
+                                            f'<div id="{_ref_paste_zone_id}" tabindex="0" '
+                                            f'style="border:2px dashed #64748b;border-radius:8px;padding:18px;'
+                                            f'text-align:center;color:#94a3b8;font-size:13px;cursor:pointer;'
+                                            f'background:#1e293b;outline:none;">'
+                                            f'📋 이미지 복사 후 여기서 <b>Ctrl+V</b> 붙여넣기<br>'
+                                            f'<span style="font-size:11px;color:#64748b">또는 파일을 드래그&드롭</span>'
+                                            f'</div>'
+                                        )
+                                        ui.upload(
+                                            label="📁 파일 선택으로도 업로드 가능",
+                                            on_upload=_on_ref_file_upload,
+                                            auto_upload=True,
+                                            multiple=True,
+                                        ).props("accept=.jpg,.jpeg,.png,.webp flat dense color=grey-7")
+
+                                        ui.separator().classes("my-2")
+
+                                        ui.label("참고 텍스트 (스마트스토어 내용 복붙)").classes("text-xs font-semibold text-slate-600")
+                                        _ref_txt_ta = ui.textarea(
+                                            value=_cur_txt,
+                                            placeholder="사용량 6,480L / 호환기기: XXX 등 정확한 스펙을 복사해서 붙여넣으세요...",
+                                        ).props("dense outlined rows=5").style("width:100%; font-size:12px")
+
+                                        with ui.row().classes("gap-2 justify-end mt-3 w-full"):
+                                            ui.button("취소", on_click=_dlg3.close).props("flat dense")
+                                            def _save3(e=e_ref, d=_dlg3, it=_ref_img_ta, tt=_ref_txt_ta):
+                                                imgs = [u.strip() for u in (it.value or "").splitlines() if u.strip().startswith("http")]
+                                                e.detail_ref_images = imgs
+                                                e.detail_ref_text   = (tt.value or "").strip()
+                                                d.close()
+                                                _cnt = len(imgs) + (1 if e.detail_ref_text else 0)
+                                                ui.notify(f"참고자료 {_cnt}건 저장됨", type="positive", timeout=2000)
+                                                _render_queue()
+                                            ui.button("저장", on_click=_save3).props("color=blue dense")
+                                    _dlg3.open()
+                                    # script 태그는 ui.html 불가 → 다이얼로그 열린 뒤 JS 주입
+                                    _pzid = _ref_paste_zone_id
+                                    await ui.run_javascript(f"""
+(function(){{
+  var _pzid="{_pzid}";
+  var _uploading=0;
+  var _docHandler=null;
+  function initPasteZone(){{
+    var zone=document.getElementById(_pzid);
+    if(!zone){{ setTimeout(initPasteZone,100); return; }}
+    if(zone._pzInited) return;
+    zone._pzInited=true;
+    function resetZone(){{
+      zone.style.borderColor="#64748b";
+      zone.innerHTML='📋 이미지 복사 후 여기서 <b>Ctrl+V</b> 붙여넣기<br><span style="font-size:11px;color:#64748b">또는 파일을 드래그&드롭</span>';
+    }}
+    function appendUrl(url){{
+      var dlg=zone.closest(".q-dialog");
+      var tas=dlg?dlg.querySelectorAll("textarea"):[];
+      var ta=null;
+      for(var i=0;i<tas.length;i++){{
+        if(tas[i].placeholder&&tas[i].placeholder.indexOf("https")!==-1){{ta=tas[i];break;}}
+      }}
+      if(ta){{
+        var cur=(ta.value||"").trim();
+        ta.value=cur?cur+"\\n"+url:url;
+        ta.dispatchEvent(new Event("input",{{bubbles:true}}));
+      }}
+    }}
+    function uploadBlob(blob,idx,total){{
+      _uploading++;
+      zone.style.borderColor="#f59e0b";
+      zone.innerHTML="⏳ 업로드 중... "+_uploading+"/"+total+"장";
+      var fd=new FormData();
+      fd.append("file",blob,"clipboard_"+idx+".png");
+      fetch("/api/extra-img/upload",{{method:"POST",body:fd}})
+        .then(function(r){{return r.json();}})
+        .then(function(data){{
+          _uploading--;
+          if(data.ok){{appendUrl(data.url);}}
+          else{{zone.style.borderColor="#ef4444";zone.innerHTML="❌ 실패: "+(data.error||"");}}
+          if(_uploading===0){{
+            zone.style.borderColor="#22c55e";
+            zone.innerHTML="✅ "+total+"장 업로드 완료!";
+            setTimeout(resetZone,2500);
+          }}
+        }}).catch(function(){{
+          _uploading--;
+          zone.style.borderColor="#ef4444";zone.innerHTML="❌ 오류";
+          if(_uploading===0)setTimeout(resetZone,3000);
+        }});
+    }}
+    function uploadUrl(url,idx,total){{
+      _uploading++;
+      zone.style.borderColor="#f59e0b";
+      zone.innerHTML="⏳ 다운로드 중... "+_uploading+"/"+total+"장";
+      fetch("/api/extra-img/url-upload",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{url:url}})}})
+        .then(function(r){{return r.json();}})
+        .then(function(data){{
+          _uploading--;
+          if(data.ok){{appendUrl(data.url);}}
+          else{{zone.style.borderColor="#ef4444";zone.innerHTML="❌ URL실패: "+(data.error||"");}}
+          if(_uploading===0){{
+            zone.style.borderColor="#22c55e";
+            zone.innerHTML="✅ "+total+"장 완료!";
+            setTimeout(resetZone,2500);
+          }}
+        }}).catch(function(){{
+          _uploading--;
+          if(_uploading===0){{zone.style.borderColor="#ef4444";zone.innerHTML="❌ 오류";setTimeout(resetZone,3000);}}
+        }});
+    }}
+    function handlePaste(e){{
+      var cd=e.clipboardData||(e.originalEvent&&e.originalEvent.clipboardData);
+      if(!cd)return;
+      var items=cd.items||[];
+      var blobs=[];
+      var hasHtml=false;
+      for(var i=0;i<items.length;i++){{
+        if(items[i].type==="text/html"){{ hasHtml=true; }}
+        if(items[i].type&&items[i].type.startsWith("image/")){{
+          var b=items[i].getAsFile();
+          if(b)blobs.push(b);
+        }}
+      }}
+      if(hasHtml){{
+        for(var i=0;i<items.length;i++){{
+          if(items[i].type==="text/html"){{
+            e.preventDefault();
+            (function(capturedBlobs){{
+              items[i].getAsString(function(html){{
+                var doc=new DOMParser().parseFromString(html,"text/html");
+                var imgs=Array.from(doc.querySelectorAll("img"));
+                var srcs=imgs.map(function(img){{return img.src||img.getAttribute("src")||"";}})
+                             .filter(function(s){{return s.startsWith("http");}});
+                if(srcs.length>0){{
+                  srcs.forEach(function(src,idx){{uploadUrl(src,idx,srcs.length);}});
+                }} else if(capturedBlobs.length>0){{
+                  capturedBlobs.forEach(function(bl,idx){{uploadBlob(bl,idx,capturedBlobs.length);}});
+                }}
+              }});
+            }})(blobs);
+            return;
+          }}
+        }}
+      }}
+      if(blobs.length>0){{
+        e.preventDefault();
+        blobs.forEach(function(bl,idx){{uploadBlob(bl,idx,blobs.length);}});
+      }}
+    }}
+    zone.addEventListener("paste",handlePaste);
+    zone.addEventListener("dragover",function(e){{e.preventDefault();zone.style.borderColor="#38bdf8";}});
+    zone.addEventListener("dragleave",function(){{zone.style.borderColor="#64748b";}});
+    zone.addEventListener("drop",function(e){{
+      e.preventDefault();
+      var files=Array.from(e.dataTransfer.files).filter(function(f){{return f.type.startsWith("image/");}});
+      if(files.length>0){{files.forEach(function(f,idx){{uploadBlob(f,idx,files.length);}});}}
+      else{{resetZone();}}
+    }});
+    zone.addEventListener("click",function(){{zone.focus();}});
+    zone.focus();
+    if(_docHandler){{document.removeEventListener("paste",_docHandler,true);}}
+    _docHandler=function(ev){{
+      var z=document.getElementById(_pzid);
+      if(!z||!document.body.contains(z)){{
+        document.removeEventListener("paste",_docHandler,true);
+        _docHandler=null;
+        return;
+      }}
+      if(document.activeElement===z)return;
+      var cd2=ev.clipboardData; if(!cd2)return;
+      var its=cd2.items||[];
+      var hasImgBlob=false;
+      for(var j=0;j<its.length;j++){{
+        if(its[j].type&&its[j].type.startsWith("image/")){{hasImgBlob=true;break;}}
+      }}
+      if(!hasImgBlob)return;
+      handlePaste(ev);
+    }};
+    document.addEventListener("paste",_docHandler,true);
+  }}
+  initPasteZone();
+}})();
+""")
+                                return _h
+
+                            _has_ref = bool((entry.detail_ref_images or []) or (entry.detail_ref_text or ""))
+                            _ref_btn_color = "orange" if _has_ref else "grey-6"
+                            _ref_cnt = len(entry.detail_ref_images or []) + (1 if entry.detail_ref_text else 0)
+                            _ref_lbl = f"🎯 참고자료 {_ref_cnt}건" if _has_ref else "🎯 참고자료"
+                            ui.button(
+                                _ref_lbl,
+                                on_click=_make_detail_ref_handler(),
+                            ).props(f"outline size=md color={_ref_btn_color}").style(
+                                "font-size:13px; font-weight:600; padding:4px 12px"
+                            ).tooltip("Gemini 판매멘트용 정확한 스펙 참고자료 (고객 비공개)")
+
+                            if _has_ref:
+                                def _make_clear_ref_handler(e_ref=entry):
+                                    def _h():
+                                        e_ref.detail_ref_images = []
+                                        e_ref.detail_ref_text = ""
+                                        ui.notify("참고자료 전체 삭제됨", type="positive", timeout=2000)
+                                        _render_queue()
+                                    return _h
+                                ui.button(
+                                    icon="close",
+                                    on_click=_make_clear_ref_handler(),
+                                ).props("flat dense round size=sm color=red").tooltip("참고자료 전체 삭제")
 
                             # ── 대표이미지 수정 버튼 (클릭 → Ctrl+V 즉시 저장) ──────
                             def _make_rep_img_handler(e_ref=entry):
@@ -9730,14 +9750,15 @@ def page() -> None:
                                 # ── 수량 설정 (다이얼로그 방식) ──────────────────
                                 _qtys_sorted = sorted(entry.qtys) if entry.qtys else [1]
                                 _is_pick_now = _qtys_sorted != list(range(_qtys_sorted[0], _qtys_sorted[-1] + 1))
+                                _entry_unit = getattr(entry, "badge_unit", "개") or "개"
                                 if _is_pick_now:
                                     _qty_summary_txt = (
                                         ", ".join(str(q) for q in _qtys_sorted[:6])
                                         + ("…" if len(_qtys_sorted) > 6 else "")
-                                        + "개"
+                                        + _entry_unit
                                     )
                                 else:
-                                    _qty_summary_txt = f"{_qtys_sorted[0]}~{_qtys_sorted[-1]}개"
+                                    _qty_summary_txt = f"{_qtys_sorted[0]}~{_qtys_sorted[-1]}{_entry_unit}"
                                 _qty_lbl = ui.label(f"📦 {_qty_summary_txt}").classes(
                                     "text-sm font-bold text-cyan-300"
                                 )
@@ -9748,6 +9769,12 @@ def page() -> None:
                                         _init_pick = _q_sorted != list(range(_q_sorted[0], _q_sorted[-1] + 1))
                                         with ui.dialog() as _dlg, ui.card().classes("w-80 gap-2"):
                                             ui.label("📦 수량 설정").classes("text-base font-bold mb-1")
+                                            with ui.row().classes("items-center gap-2"):
+                                                ui.label("🏷 배지 단위").classes("text-xs text-slate-400")
+                                                _dlg_unit = ui.select(
+                                                    ["개", "세트", "박스", "묶음"],
+                                                    value=getattr(e_ref, "badge_unit", "개") or "개",
+                                                ).props("dense outlined").style("width:90px")
                                             _dlg_mode = ui.toggle(
                                                 {"range": "① 최소~최대 수량", "pick": "② 수량 개별선택"},
                                                 value="pick" if _init_pick else "range",
@@ -9807,7 +9834,9 @@ def page() -> None:
                                                 def _apply_qty(
                                                     tog=_dlg_mode, mn_i=_dlg_min, mx_i=_dlg_max,
                                                     cks=_dlg_checks, er=e_ref, lbl_ref=lbl, dlg=_dlg,
+                                                    unit_i=_dlg_unit,
                                                 ):
+                                                    _unit = unit_i.value or "개"
                                                     if tog.value == "range":
                                                         try:
                                                             _mn = max(1, min(100, int(mn_i.value or 1)))
@@ -9816,7 +9845,7 @@ def page() -> None:
                                                             _mn, _mx = 1, 1
                                                         er.qtys = list(range(_mn, _mx + 1)) or [_mn]
                                                         er.min_qty = _mn
-                                                        lbl_ref.set_text(f"📦 {_mn}~{_mx}개")
+                                                        lbl_ref.set_text(f"📦 {_mn}~{_mx}{_unit}")
                                                     else:
                                                         _picked = sorted(q for q, cb in cks.items() if cb.value)
                                                         if not _picked:
@@ -9827,9 +9856,10 @@ def page() -> None:
                                                         _txt = (
                                                             ", ".join(str(q) for q in _picked[:6])
                                                             + ("…" if len(_picked) > 6 else "")
-                                                            + "개"
+                                                            + _unit
                                                         )
                                                         lbl_ref.set_text(f"📦 {_txt}")
+                                                    er.badge_unit = _unit
                                                     er.qty_locked = True
                                                     dlg.close()
                                                 ui.button("✅ 적용", on_click=_apply_qty).props("color=teal dense")
@@ -10090,6 +10120,8 @@ def page() -> None:
             use_nobg     = nobg_toggle.value == "on",
             lead_time    = 10 if shipping_mode.value == "overseas" else 2,
             watch_store  = _main_store_sel.value or "샵케이",
+            badge_unit   = badge_unit_select.value or "개",
+            ai_bg_regen  = bool(ai_bg_toggle.value),
         )
         queue.append(entry)
         new_url_input.set_value("")
@@ -10384,6 +10416,11 @@ def page() -> None:
                 )
             except Exception:
                 pass
+            # ── 자동 다운로드 — 다운로드 깜빡하고 넘어가는 실수 방지 ──
+            try:
+                ui.download(str(_OUTPUT_ROOT / _global_output_file["v"]))
+            except Exception:
+                pass
 
         _prev_done["v"] = _should_show_dl
 
@@ -10522,8 +10559,10 @@ def page_price_fix() -> None:
                                 r2 = _re2.sub(r'\s*t="[^"]*"', '', inner, count=1)
                                 # 기존 값 태그(inlineStr 또는 numeric) 제거
                                 r2 = _re2.sub(r'<is>.*?</is>|<v>[^<]*</v>', '', r2, flags=_re2.DOTALL)
-                                # t="n" 명시 + <v> 삽입 (openpyxl 호환 형식)
-                                return _re2.sub(r'>\s*</c>$', f' t="n"><v>{_sp}</v></c>', r2)
+                                # Wing 자체 엑셀은 숫자값도 전부 inlineStr(텍스트)로 기록함 —
+                                # 같은 행의 다른 셀과 형식을 맞춰야 Wing 업로드 파서가 인식함
+                                # (t="n" 숫자형으로 넣으면 "일괄변경 할 데이터가 없습니다" 오류 발생)
+                                return _re2.sub(r'>\s*</c>$', f' t="inlineStr"><is><t>{_sp}</t></is></c>', r2)
 
                             pat_full = (r'<c\b[^>]*\br="'
                                         + _re2.escape(ref)
@@ -10538,7 +10577,7 @@ def page_price_fix() -> None:
                                 def _replacer_self(m, _sp=sp):
                                     inner = _re2.sub(r'\s*t="[^"]*"', '', m.group(0))
                                     return _re2.sub(r'\s*/>\s*$',
-                                                    f' t="n"><v>{_sp}</v></c>', inner)
+                                                    f' t="inlineStr"><is><t>{_sp}</t></is></c>', inner)
 
                                 pat_self = (r'<c\b[^>]*\br="'
                                             + _re2.escape(ref)
@@ -10553,7 +10592,7 @@ def page_price_fix() -> None:
                                 row_pat = (r'(<row\b[^>]*\br="'
                                            + str(row_num)
                                            + r'"[^>]*>)((?:(?!</row>).)*)(</row>)')
-                                new_cell = f'<c r="{ref}" t="n"><v>{sp}</v></c>'
+                                new_cell = f'<c r="{ref}" t="inlineStr"><is><t>{sp}</t></is></c>'
 
                                 def _insert(m, _nc=new_cell, _cl=col_letter, _rn=row_num):
                                     content = m.group(2)
@@ -10577,6 +10616,20 @@ def page_price_fix() -> None:
                             if replaced:
                                 patched_count += 1
 
+                        # Wing 검색필터로 받은 엑셀은 <dimension> 태그가 실제 행수보다
+                        # 작게 잘못 기록되는 경우가 있음(예: 127행 데이터인데 A1:S3로 표기).
+                        # 이 값이 틀리면 Wing 업로드가 "일괄변경 할 데이터가 없습니다"로 거부함.
+                        dim_m = _re2.search(r'<dimension ref="[^"]*"/>', text)
+                        if dim_m:
+                            row_nums = [int(n) for n in _re2.findall(r'<row r="(\d+)"', text)]
+                            col_refs = _re2.findall(r'<c r="([A-Z]+)\d+"', text)
+                            if row_nums and col_refs:
+                                max_row = max(row_nums)
+                                max_col = max(col_refs, key=lambda c: (len(c), c))
+                                text = (text[:dim_m.start()]
+                                        + f'<dimension ref="A1:{max_col}{max_row}"/>'
+                                        + text[dim_m.end():])
+
                         data = text.encode("utf-8")
                     zout.writestr(item, data)
         return dst.getvalue(), patched_count
@@ -10585,18 +10638,51 @@ def page_price_fix() -> None:
         _make_nav_header("price-fix")
         ui.separator()
 
-        ui.label("가격수정").classes("text-2xl font-bold text-slate-800 mb-1")
+        ui.label("가격/재고 수정").classes("text-2xl font-bold text-slate-800 mb-1")
         ui.label(
-            "쿠팡 WING에서 다운받은 엑셀을 업로드하면 가격변동알림에 맞게 가격을 자동 계산해 수정 엑셀을 생성합니다."
+            "가격상승은 1.3배 마진 적용, 품절은 재고 0, 재입고는 재고 500개로 복구 — Wing 엑셀 하나로 한 번에 자동 반영합니다. "
+            "(가격하락은 수동 처리)"
         ).classes("text-sm text-slate-500 mb-4")
+
+        _STORES = ["샵케이", "제니스 트레이딩", "포트"]
+        _state: dict = {"store": _STORES[0]}
+        _parsed_cache: dict = {"base_rows": None}
+
+        # ── 스토어 선택 카드 ──────────────────────────────────────
+        with ui.card().classes("shadow-sm w-full mb-4"):
+            with ui.card_section():
+                ui.label("① 스토어 선택").classes("font-bold text-slate-700 mb-2")
+                ui.label(
+                    "선택한 스토어의 가격변동알림만 매칭 대상으로 사용합니다 (다른 스토어 상품과의 오매칭 방지)"
+                ).classes("text-xs text-slate-400 mb-3")
+                _store_change_holder: dict = {"fn": None}
+                store_select = ui.select(
+                    _STORES, value=_STORES[0],
+                    on_change=lambda e: _store_change_holder["fn"](e) if _store_change_holder["fn"] else None,
+                ).classes("w-48")
+
+        # ── 검색용 상품ID 카드 ────────────────────────────────────
+        with ui.card().classes("shadow-sm w-full mb-4"):
+            with ui.card_section():
+                ui.label("② Wing 검색용 상품ID").classes("font-bold text-slate-700 mb-2")
+                ui.label(
+                    "캐싱된 ID를 복사해 Wing 검색창(쉼표/줄바꿈/공백 구분 지원 확인됨)에 붙여넣으면 해당 상품만 필터링됩니다. "
+                    "ID는 ③ 엑셀 업로드 시 자동으로 캐싱되니, 처음엔 전체(또는 500개씩) 한 번 업로드해두면 다음부턴 소량 다운로드만 하면 됩니다."
+                ).classes("text-xs text-slate-400 mb-3")
+                id_copy_area = ui.column().classes("w-full")
 
         # ── 업로드 카드 ──────────────────────────────────────────
         with ui.card().classes("shadow-sm w-full mb-4"):
             with ui.card_section():
-                ui.label("① WING 엑셀 업로드").classes("font-bold text-slate-700 mb-2")
+                ui.label("③ WING 가격 엑셀 업로드").classes("font-bold text-slate-700 mb-2")
                 ui.label(
-                    "쿠팡 WING → 상품관리 → 가격/재고/판매상태 → 엑셀 다운로드 후 업로드"
+                    "쿠팡 WING → 상품관리 → 가격/재고/판매상태 → 엑셀 다운로드 후 업로드 (가격상승/품절/재입고 자동 반영)"
                 ).classes("text-xs text-slate-400 mb-3")
+                ui.label(
+                    "⚠️ 아래에서 받은 '수정' 엑셀은 Wing에 바로 올리지 말고, 반드시 Excel로 열어서 "
+                    "Ctrl+S로 한 번 저장한 뒤 그 파일을 Wing에 업로드하세요 "
+                    "(그냥 올리면 '일괄변경 할 데이터가 없습니다' 오류 발생)."
+                ).classes("text-xs text-amber-500 font-semibold mb-3")
 
                 file_lbl = ui.label("파일을 선택하세요").classes("text-sm text-slate-400 mb-2")
 
@@ -10606,6 +10692,15 @@ def page_price_fix() -> None:
         dl_row = ui.row().classes("w-full items-center gap-3 mt-2")
         dl_btn = None
 
+        # ── 품절 상품 카드 ────────────────────────────────────────
+        with ui.card().classes("shadow-sm w-full mb-4"):
+            with ui.card_section():
+                ui.label("④ 품절 상품 — Wing 재고수량 일괄변경 대상").classes("font-bold text-slate-700 mb-2")
+                ui.label(
+                    "아래 상품명을 Wing에서 검색·전체선택 후 '재고수량 일괄변경'으로 0 처리하세요. 처리 후 확인 버튼을 눌러주세요."
+                ).classes("text-xs text-slate-400 mb-3")
+                soldout_area = ui.column().classes("w-full")
+
         def _qty_from_option(opt: str) -> int:
             m = _re.search(r'(\d+)개', str(opt))
             return int(m.group(1)) if m else 1
@@ -10613,9 +10708,7 @@ def page_price_fix() -> None:
         def _normalize(s: str) -> str:
             return _re.sub(r'\s+', ' ', str(s).lower().strip())
 
-        def _token_overlap(a: str, b: str) -> float:
-            ta = set(_normalize(a).split())
-            tb = set(_normalize(b).split())
+        def _token_overlap(ta: set, tb: set) -> float:
             if not ta or not tb:
                 return 0.0
             return len(ta & tb) / min(len(ta), len(tb))
@@ -10628,21 +10721,31 @@ def page_price_fix() -> None:
             s = _re.sub(r'\s+', '', name.lower())
             return _STOP_PAT.sub('', s)
 
-        def _match_alert(excel_name: str, option_name: str):
-            """가격변동알림 매칭 — 공백무시 핵심 문자열 비교."""
-            alerts = [w for w in _pc.all_watches() if w.status in ("risen", "fallen")]
+        def _key_alerts(alerts: list):
+            """매칭용 키/토큰을 알림마다 한 번만 미리 계산 (행마다 재계산하면
+            감시대상이 많을 때 매우 느려짐 — 전체 감시목록을 매칭 풀로 쓰게 되면서 중요해짐)."""
+            keyed = []
+            for w in alerts:
+                al_key = _key(w.name or "")
+                if not al_key:
+                    continue
+                keyed.append((w, al_key, set(_normalize(w.name or "").split())))
+            return keyed
+
+        def _match_alert(excel_name: str, option_name: str, alerts_keyed: list):
+            """가격변동알림 매칭 — 공백무시 핵심 문자열 비교.
+            alerts_keyed는 _key_alerts()로 미리 키를 계산해 넘겨야 함."""
             ex_key = _key(excel_name)
             # 상품명+옵션명 결합 키 (옵션에 식별 정보가 들어있는 경우 보완)
             _combined = (str(excel_name).strip() + " " + str(option_name).strip()).strip()
             ex_key2 = _key(_combined) if _combined != str(excel_name).strip() else ex_key
             if not ex_key:
                 return (None, 0.0)
+            ex_tokens  = set(_normalize(excel_name).split())
+            ex_tokens2 = set(_normalize(_combined).split())
 
             best, best_score = None, 0.0
-            for w in alerts:
-                al_key = _key(w.name or "")
-                if not al_key:
-                    continue
+            for w, al_key, al_tokens in alerts_keyed:
                 score = 0.0
                 # 상품명만 / 상품명+옵션명 결합 — 둘 다 시도해서 최대 점수
                 for ek in ([ex_key] if ex_key2 == ex_key else [ex_key, ex_key2]):
@@ -10660,8 +10763,8 @@ def page_price_fix() -> None:
                 # 키 기반 매칭 실패 시 토큰 오버랩 폴백
                 if score < 0.80:
                     tok = max(
-                        _token_overlap(w.name or "", excel_name),
-                        _token_overlap(w.name or "", _combined),
+                        _token_overlap(al_tokens, ex_tokens),
+                        _token_overlap(al_tokens, ex_tokens2),
                     )
                     if tok > score:
                         score = tok
@@ -10687,9 +10790,9 @@ def page_price_fix() -> None:
             tmp.write(_file_bytes)
             tmp.close()
 
-            try:
+            def _parse_workbook(path):
                 import openpyxl as _opx
-                _wb_price = _opx.load_workbook(tmp.name, data_only=True)
+                _wb_price = _opx.load_workbook(path, data_only=True)
                 # 모든 시트 중 데이터 행이 가장 많은 시트 선택
                 _best_sheet_name = _wb_price.active.title
                 _all_rows = []
@@ -10702,6 +10805,13 @@ def page_price_fix() -> None:
                         _best_sheet_name = _sname
                         _all_rows = _srows
                 _wb_price.close()
+                return _all_rows, _best_sheet_name
+
+            try:
+                # 대용량 엑셀 파싱은 이벤트루프를 블로킹하므로 스레드로 분리
+                # (그렇지 않으면 websocket ping이 막혀 "Connection lost" 발생)
+                loop = asyncio.get_running_loop()
+                _all_rows, _best_sheet_name = await loop.run_in_executor(None, _parse_workbook, tmp.name)
                 _meta["sheet_name"] = _best_sheet_name
             except Exception as ex:
                 file_lbl.set_text(f"❌ 파싱 실패: {ex}")
@@ -10742,15 +10852,23 @@ def page_price_fix() -> None:
             _col_expname  = _col(['쿠팡 노출 상품명', '노출 상품명'])
             _col_optname  = _col(['등록 옵션명', '옵션명'])
             _col_price    = _col(['판매가격'])
-            # 수정요청 열: 두 번째 '판매가격'
-            _col_newprice = None
-            _found_first  = False
-            for _i, _h in enumerate(_hdr):
-                if '판매가격' in _h:
-                    if _found_first:
-                        _col_newprice = _i
-                        break
-                    _found_first = True
+            _col_disc     = _col(['할인율기준가'])
+            _col_status   = _col(['판매상태'])
+            _col_stock    = _col(['잔여수량'])
+            _col_pid      = _col(['업체상품 ID', '업체상품ID', 'Product ID'])
+
+            def _second_col(substr):
+                """헤더에 substr이 들어간 컬럼 중 두 번째 (Wing 엑셀은 '현재값'/'*변경·수정요청'
+                섹션 헤더가 동일한 문구를 반복함 — 두 번째가 수정요청 입력란).
+                Wing은 판매가격뿐 아니라 할인율기준가/판매상태/잔여수량까지 4칸을 전부
+                채워야 그 행을 유효한 변경으로 인식함(하나라도 비면 행 전체 무시)."""
+                idxs = [i for i, h in enumerate(_hdr) if substr in h]
+                return idxs[1] if len(idxs) > 1 else None
+
+            _col_newprice  = _second_col('판매가격')
+            _col_newdisc   = _second_col('할인율기준가')
+            _col_newstatus = _second_col('판매상태')
+            _col_newstock  = _second_col('잔여수량')
 
             # 감지된 컬럼 정보 저장 (download에서 사용)
             _meta["data_start_row"] = _header_row + 2   # openpyxl 1-indexed: header=row3, data=row4
@@ -10760,22 +10878,25 @@ def page_price_fix() -> None:
                 _meta["newprice_col"] = _col_price + 1
             else:
                 _meta["newprice_col"] = 16
+            _meta["newdisc_col"]   = (_col_newdisc + 1)   if _col_newdisc   is not None else None
+            _meta["newstatus_col"] = (_col_newstatus + 1) if _col_newstatus is not None else None
+            _meta["newstock_col"]  = (_col_newstock + 1)  if _col_newstock  is not None else None
 
             # 디버그 알림
-            _alerts_cnt = len([w for w in _pc.all_watches() if w.status in ('risen','fallen')])
+            _alerts_cnt = len([w for w in _pc.all_watches() if w.status == "risen" and w.store == _state["store"]])
             _sample_row = _all_rows[_data_start] if len(_all_rows) > _data_start else []
             _sample_name = _cell_str(_sample_row[_col_regname or 7]) if len(_sample_row) > (_col_regname or 7) else ""
             _write_col_0idx = _meta["newprice_col"] - 1
             _write_col_hdr  = _hdr[_write_col_0idx] if _write_col_0idx < len(_hdr) else "?"
             ui.notify(
-                f"시트:{_meta.get('sheet_name','?')} | 총행:{len(_all_rows)} | 알림:{_alerts_cnt}개 | "
+                f"시트:{_meta.get('sheet_name','?')} | 총행:{len(_all_rows)} | 알림({_state['store']}):{_alerts_cnt}개 | "
                 f"헤더row:{_header_row} | 가격col:{_col_price} | "
                 f"수정col:{_col_newprice} | 기입열:{_meta['newprice_col']}({_write_col_hdr}) | "
                 f"샘플:{_sample_name[:25]}",
                 timeout=20000, type="info"
             )
 
-            matched_cnt = 0
+            base_rows = []
             for row in _all_rows[_data_start:]:
                 _rn  = _col_regname  if _col_regname  is not None else 7
                 _en  = _col_expname  if _col_expname  is not None else 6
@@ -10789,42 +10910,22 @@ def page_price_fix() -> None:
                     cur_price = int(float(str(row[_pn]))) if _pn < len(row) and not _is_empty(row[_pn]) else 0
                 except Exception:
                     cur_price = 0
-
-                qty = _qty_from_option(option_name)
-                alert, score = _match_alert(excel_name, option_name)
-
-                if alert and cur_price > 0:
-                    new_price = cur_price + alert.change * qty
-                    if new_price < 1000:
-                        new_price = 1000  # 최소 1,000원
-                    matched_cnt += 1
-                else:
-                    new_price = None
-
-                _rows.append({
+                product_id = _cell_str(row[_col_pid]) if _col_pid is not None and _col_pid < len(row) else ""
+                cur_disc   = _cell_str(row[_col_disc])   if _col_disc   is not None and _col_disc   < len(row) else ""
+                cur_status = _cell_str(row[_col_status]) if _col_status is not None and _col_status < len(row) else ""
+                cur_stock  = _cell_str(row[_col_stock])  if _col_stock  is not None and _col_stock  < len(row) else ""
+                base_rows.append({
                     "excel_name":  excel_name,
-                    "option":      option_name,
-                    "qty":         qty,
+                    "option_name": option_name,
                     "cur_price":   cur_price,
-                    "alert":       alert,
-                    "score":       score,
-                    "new_price":   new_price,
-                    "matched":     alert is not None and cur_price > 0,
+                    "product_id":  product_id,
+                    "cur_disc":    cur_disc,
+                    "cur_status":  cur_status,
+                    "cur_stock":   cur_stock,
                 })
 
-            file_lbl.set_text(f"✅ {_fname} — {len(_rows)}행 / 매칭 {matched_cnt}개")
-            file_lbl.classes(remove="text-slate-400 text-red-500", add="text-green-600 font-semibold")
-
-            _render_table()
-
-            # 다운로드 버튼
-            nonlocal dl_btn
-            dl_row.clear()
-            with dl_row:
-                dl_btn = ui.button(
-                    f"📥 수정 엑셀 다운로드 ({matched_cnt}개 가격 변경)",
-                    on_click=_download_excel,
-                ).classes("bg-rose-600 text-white font-bold px-6 py-2 rounded-lg")
+            _parsed_cache["base_rows"] = base_rows
+            _apply_matching()
 
         def _render_table():
             result_area.clear()
@@ -10835,47 +10936,226 @@ def page_price_fix() -> None:
 
                 # 요약
                 matched = [r for r in _rows if r["matched"]]
-                unmatched = [r for r in _rows if not r["matched"]]
+                unmatched_n = len(_rows) - len(matched)
                 with ui.row().classes("gap-4 mb-3 flex-wrap"):
                     ui.label(f"✅ 매칭: {len(matched)}개").classes("text-green-600 font-bold text-sm")
-                    ui.label(f"⚪ 미매칭(변동없음): {len(unmatched)}개").classes("text-slate-400 text-sm")
+                    ui.label(f"⚪ 미매칭(변동없음, 표시 생략): {unmatched_n}개").classes("text-slate-400 text-sm")
 
-                # 테이블
-                with ui.element("div").classes("w-full overflow-x-auto"):
-                    with ui.element("table").classes("w-full text-sm border-collapse"):
-                        with ui.element("thead"):
-                            with ui.element("tr").classes("bg-slate-100 text-slate-600"):
-                                for col in ["상품명", "옵션", "수량", "현재가격", "변동(단가)", "새 가격", "상태"]:
-                                    ui.element("th").classes("px-3 py-2 text-left border-b border-slate-200 whitespace-nowrap").text = col
-                        with ui.element("tbody"):
-                            prev_name = ""
-                            for r in _rows:
-                                row_cls = "border-b border-slate-100 "
-                                if r["matched"]:
-                                    row_cls += "bg-green-50 hover:bg-green-100"
-                                else:
-                                    row_cls += "hover:bg-slate-50"
-                                with ui.element("tr").classes(row_cls):
-                                    # 상품명 (같은 상품은 반복 표시 줄임)
-                                    show_name = r["excel_name"] if r["excel_name"] != prev_name else "↳"
-                                    prev_name = r["excel_name"]
-                                    ui.element("td").classes("px-3 py-1.5 text-slate-700 max-w-xs truncate").text = show_name[:40]
-                                    ui.element("td").classes("px-3 py-1.5 text-slate-500").text = r["option"][:20]
-                                    ui.element("td").classes("px-3 py-1.5 text-center text-slate-500").text = str(r["qty"])
-                                    ui.element("td").classes("px-3 py-1.5 text-right font-mono").text = f"{r['cur_price']:,}원" if r["cur_price"] else "-"
-                                    if r["alert"]:
-                                        chg = r["alert"].change
-                                        chg_cls = "px-3 py-1.5 text-right font-mono font-bold " + ("text-red-500" if chg > 0 else "text-blue-500")
-                                        ui.element("td").classes(chg_cls).text = f"+{chg:,}" if chg > 0 else f"{chg:,}"
-                                    else:
-                                        ui.element("td").classes("px-3 py-1.5 text-slate-300 text-center").text = "-"
-                                    if r["new_price"]:
-                                        ui.element("td").classes("px-3 py-1.5 text-right font-mono font-bold text-green-700").text = f"{r['new_price']:,}원"
-                                    else:
-                                        ui.element("td").classes("px-3 py-1.5 text-slate-300 text-center").text = "-"
-                                    status = "✅ 매칭" if r["matched"] else "⚪ 유지"
-                                    status_cls = "px-3 py-1.5 text-center text-xs " + ("text-green-600 font-semibold" if r["matched"] else "text-slate-300")
-                                    ui.element("td").classes(status_cls).text = status
+                if not matched:
+                    return
+
+                # 테이블 — 매칭된 행만 표시 (미매칭 수천 행까지 그리면 매우 느려짐).
+                # 수백 개 행을 ui.element로 하나씩 만들면 느리고, 이 앱의 다크테마 CSS가
+                # 밝은 배경용 text-slate-* 클래스를 강제로 덮어써 글자가 안 보이는 문제가 있었음.
+                # ui.table(QTable)은 한 번에 데이터를 넘기고 자체 라이트 테마로 렌더링돼 두 문제 다 피함.
+                columns = [
+                    {"name": "name",   "label": "상품명",      "field": "name",   "align": "left"},
+                    {"name": "option", "label": "옵션",        "field": "option", "align": "left"},
+                    {"name": "qty",    "label": "수량",        "field": "qty",    "align": "center"},
+                    {"name": "cur",    "label": "현재가격",     "field": "cur",    "align": "right"},
+                    {"name": "chg",    "label": "변동(단가)",   "field": "chg",    "align": "right"},
+                    {"name": "new",    "label": "새 가격",      "field": "new",    "align": "right"},
+                ]
+                table_rows = []
+                for i, r in enumerate(matched):
+                    chg = r["alert"].change if r["alert"] else 0
+                    table_rows.append({
+                        "id":     i,
+                        "name":   r["excel_name"][:60],
+                        "option": r["option"][:30],
+                        "qty":    r["qty"],
+                        "cur":    f"{r['cur_price']:,}원" if r["cur_price"] else "-",
+                        "chg":    f"+{chg:,}" if chg > 0 else f"{chg:,}",
+                        "new":    f"{r['new_price']:,}원" if r["new_price"] else "-",
+                    })
+                ui.table(columns=columns, rows=table_rows, row_key="id", pagination=25).classes(
+                    "w-full"
+                ).props("dense flat bordered")
+
+        def _apply_matching():
+            """캐시된 파싱 결과에 현재 선택된 스토어 기준으로 알림 매칭을 (재)적용."""
+            nonlocal dl_btn
+            base_rows = _parsed_cache["base_rows"]
+            if base_rows is None:
+                return
+
+            store = _state["store"]
+            _rows.clear()
+            matched_cnt = 0
+            soldout_cnt = 0
+            restocked_cnt = 0
+            id_map: dict = {}  # uid -> wing_product_id (매칭되면 알림 상태 상관없이 전부 캐싱)
+            # price_watch.json 로딩은 행마다가 아니라 여기서 한 번만 (대량 업로드 성능)
+            # ID 캐싱은 알림 여부와 무관하게 감시목록 전체를 대상으로 함 — 신규 등록 상품도
+            # 알림 뜨기 전에 미리 ID를 확보해두기 위함. 가격/재고 반영은 아래에서
+            # alert.status가 risen/soldout/restocked일 때만 하므로 정상 상품은 안 건드림.
+            alerts = [w for w in _pc.all_watches() if w.store == store]
+            alerts_keyed = _key_alerts(alerts)
+            for br in base_rows:
+                option_name = br["option_name"]
+                cur_price   = br["cur_price"]
+                qty = _qty_from_option(option_name)
+                alert, score = _match_alert(br["excel_name"], option_name, alerts_keyed)
+
+                if alert and br["product_id"]:
+                    id_map[alert.uid] = br["product_id"]
+
+                kind = None
+                new_price = None
+                if alert and alert.status == "risen" and cur_price > 0:
+                    # 가격상승 알림 → 개당 변동액 × 1.3배 마진 적용 × 수량
+                    new_price = cur_price + round(alert.change * 1.3) * qty
+                    # Wing 정책: 가격은 반드시 10원 단위여야 함 (아니면 업로드 전체 무효 처리됨)
+                    new_price = round(new_price / 10) * 10
+                    if new_price < 1000:
+                        new_price = 1000  # 최소 1,000원
+                    kind = "risen"
+                    matched_cnt += 1
+                elif alert and alert.status == "soldout":
+                    kind = "soldout"
+                    soldout_cnt += 1
+                elif alert and alert.status == "restocked":
+                    # 재입고 — 재입고 시점 가격만 새 기준가로 리셋돼 있고 이전 가격과의
+                    # 차액 정보가 없어 가격은 그대로 두고 재고만 옵션당 500개로 복구
+                    kind = "restocked"
+                    restocked_cnt += 1
+
+                _rows.append({
+                    "excel_name":  br["excel_name"],
+                    "option":      option_name,
+                    "qty":         qty,
+                    "cur_price":   cur_price,
+                    "cur_disc":    br["cur_disc"],
+                    "cur_status":  br["cur_status"],
+                    "cur_stock":   br["cur_stock"],
+                    "alert":       alert if kind == "risen" else None,
+                    "alert_uid":   alert.uid if alert else None,
+                    "score":       score,
+                    "new_price":   new_price,
+                    "kind":        kind,
+                    "matched":     kind == "risen",
+                })
+
+            _cached_n = _pc.set_wing_product_ids(id_map)
+
+            file_lbl.set_text(
+                f"✅ {_fname_holder['v']} — {len(_rows)}행 / 가격매칭 {matched_cnt}개 / 품절매칭 {soldout_cnt}개 / "
+                f"재입고매칭 {restocked_cnt}개 / 상품ID 신규캐싱 {_cached_n}개 (스토어: {store})"
+            )
+            file_lbl.classes(remove="text-slate-400 text-red-500", add="text-green-600 font-semibold")
+
+            _render_table()
+            _render_id_copy()
+            _render_soldout()
+
+            dl_row.clear()
+            with dl_row:
+                dl_btn = ui.button(
+                    f"📥 수정 엑셀 다운로드 ({matched_cnt}개 가격변경 + {soldout_cnt}개 품절처리 + {restocked_cnt}개 재입고)",
+                    on_click=_download_excel,
+                ).classes("bg-rose-600 text-white font-bold px-6 py-2 rounded-lg")
+                if matched_cnt or soldout_cnt or restocked_cnt:
+                    ui.button(
+                        f"✅ 확인완료 처리 ({matched_cnt + soldout_cnt + restocked_cnt}개)",
+                        on_click=_ack_matched,
+                    ).classes("bg-emerald-600 text-white font-bold px-6 py-2 rounded-lg")
+
+        def _ack_matched():
+            """Wing 반영 완료 후 수동으로 눌러 알림을 정리 — 다운로드만으로는 자동 확인 처리하지 않음
+            (Wing 업로드가 실패했는데 알림이 먼저 사라지는 오탐 방지)."""
+            uids = {r["alert_uid"] for r in _rows
+                    if r["kind"] in ("risen", "soldout", "restocked") and r["alert_uid"]}
+            if not uids:
+                ui.notify("확인 처리할 알림이 없습니다.", type="warning")
+                return
+            _pc.reset_base_prices_bulk(uids)
+            ui.notify(
+                f"✅ {len(uids)}개 알림 확인완료 처리됨 — 상단 배지 숫자는 새로고침하면 갱신됩니다.",
+                color="positive", timeout=6000,
+            )
+            _render_id_copy()
+            _render_soldout()
+
+        def _render_soldout():
+            soldout_area.clear()
+            store = _state["store"]
+            items = [w for w in _pc.all_watches() if w.status == "soldout" and w.store == store]
+            with soldout_area:
+                if not items:
+                    ui.label(f"'{store}' 품절 상품 없음").classes("text-slate-400 text-sm")
+                    return
+                for w in items:
+                    with ui.row().classes("items-center gap-3 w-full border-b border-slate-100 py-2"):
+                        ui.label(w.name or w.url).classes("flex-1 text-sm text-slate-700 truncate")
+                        ui.link("네이버", w.url, new_tab=True).classes("text-xs text-blue-500 shrink-0")
+
+                        def _make_ack(uid: str):
+                            def _ack():
+                                _pc.reset_base_price(uid)
+                                ui.notify("확인 처리 완료", color="positive")
+                                _render_soldout()
+                            return _ack
+
+                        ui.button("✅ 확인", on_click=_make_ack(w.uid)).classes(
+                            "bg-slate-200 text-slate-700 text-xs px-3 py-1 rounded shrink-0"
+                        )
+
+        def _render_id_copy():
+            id_copy_area.clear()
+            store = _state["store"]
+            risen = [w for w in _pc.all_watches() if w.status == "risen" and w.store == store]
+            sold  = [w for w in _pc.all_watches() if w.status == "soldout" and w.store == store]
+            restk = [w for w in _pc.all_watches() if w.status == "restocked" and w.store == store]
+
+            def _copy_ids(items, label):
+                ids = [w.wing_product_id for w in items if w.wing_product_id]
+
+                async def _do_copy():
+                    if not ids:
+                        ui.notify(
+                            "복사할 캐싱된 ID가 없습니다 — 먼저 엑셀을 한 번 업로드해 ID를 캐싱하세요.",
+                            type="warning", timeout=4000,
+                        )
+                        return
+                    text = ",".join(ids)
+                    esc = text.replace("\\", "\\\\").replace("`", "\\`")
+                    await ui.run_javascript(
+                        f"navigator.clipboard.writeText(`{esc}`)"
+                        f".catch(()=>{{const t=document.createElement('textarea');"
+                        f"t.value=`{esc}`;document.body.appendChild(t);"
+                        f"t.select();document.execCommand('copy');"
+                        f"document.body.removeChild(t);}});"
+                    )
+                    ui.notify(f"{label} 상품ID {len(ids)}개 복사됨 — Wing 검색창에 붙여넣으세요.", color="positive")
+
+                return _do_copy
+
+            with id_copy_area:
+                if not risen and not sold and not restk:
+                    ui.label("현재 가격상승/품절/재입고 알림 없음").classes("text-slate-400 text-sm")
+                for items, label, emoji in ((risen, "가격상승", "📈"), (sold, "품절", "❌"), (restk, "재입고", "🟢")):
+                    if not items:
+                        continue
+                    cached = sum(1 for w in items if w.wing_product_id)
+                    with ui.row().classes("items-center gap-3 w-full py-1"):
+                        ui.label(f"{emoji} {label} 알림: {len(items)}개 (ID캐싱 {cached}개)").classes(
+                            "text-sm text-slate-600 flex-1"
+                        )
+                if risen or sold or restk:
+                    all_items = risen + sold + restk
+                    all_cached = sum(1 for w in all_items if w.wing_product_id)
+                    ui.button(
+                        f"📋 전체 ID 복사 (가격상승+품절+재입고, {all_cached}개)",
+                        on_click=_copy_ids(all_items, "가격상승+품절+재입고"),
+                    ).props("dense").classes("bg-indigo-600 text-white text-xs px-3 py-1 rounded mt-1")
+
+        def _on_store_change(e):
+            _state["store"] = e.value
+            _apply_matching()
+            _render_soldout()
+            _render_id_copy()
+
+        _store_change_holder["fn"] = _on_store_change
 
         async def _download_excel():
             if not _raw_bytes[0] or not _rows:
@@ -10883,34 +11163,67 @@ def page_price_fix() -> None:
                 return
 
             DATA_START_ROW = _meta["data_start_row"]
-            PRICE_COL      = _meta["newprice_col"]
+            PRICE_COL  = _meta["newprice_col"]
+            DISC_COL   = _meta.get("newdisc_col")
+            STATUS_COL = _meta.get("newstatus_col")
+            STOCK_COL  = _meta.get("newstock_col")
 
-            # ZIP 직접 패치 — openpyxl save() 없이 원본 구조 100% 보존
-            row_price_map = {}
+            # ZIP 직접 패치 — openpyxl save() 없이 원본 구조 100% 보존.
+            # Wing은 *변경/수정요청 4칸(판매가격/할인율기준가/판매상태/잔여수량)이
+            # 전부 채워져야 그 행을 유효한 변경으로 인식함 — 하나라도 비면 행 전체 무시됨
+            # ("일괄변경 할 데이터가 없습니다" 오류의 원인). 그래서 바꾸지 않는 값도
+            # 현재값을 그대로 복사해 채워 넣음.
+            price_map, disc_map, status_map, stock_map = {}, {}, {}, {}
             for i, r in enumerate(_rows):
-                if r["matched"] and r["new_price"]:
-                    row_price_map[DATA_START_ROW + i] = r["new_price"]
+                row_n = DATA_START_ROW + i
+                if r["kind"] == "risen" and r["new_price"]:
+                    price_map[row_n]  = r["new_price"]
+                    disc_map[row_n]   = r["new_price"]   # 할인율기준가도 같이 올려 할인 미표기 유지
+                    status_map[row_n] = r["cur_status"]  # 판매상태는 기존값 그대로
+                    stock_map[row_n]  = r["cur_stock"]   # 재고도 기존값 그대로
+                elif r["kind"] == "soldout":
+                    price_map[row_n]  = r["cur_price"]   # 가격 변경 없음 — 기존값 그대로
+                    disc_map[row_n]   = r["cur_disc"]
+                    status_map[row_n] = r["cur_status"]
+                    stock_map[row_n]  = 0                 # 재고만 0 처리
+                elif r["kind"] == "restocked":
+                    price_map[row_n]  = r["cur_price"]   # 가격 변경 없음 — 기존값 그대로
+                    disc_map[row_n]   = r["cur_disc"]
+                    status_map[row_n] = r["cur_status"]
+                    stock_map[row_n]  = 500               # 재입고 — 재고 옵션당 500개로 복구
+
+            if not price_map:
+                ui.notify("패치할 행이 없습니다.", color="warning")
+                return
 
             try:
-                patched, _n_patched = _patch_xlsx_prices(_raw_bytes[0], row_price_map, PRICE_COL)
+                # 대용량 시트 XML에 대한 정규식 치환 반복은 이벤트루프를 블로킹하므로 스레드로 분리
+                loop = asyncio.get_running_loop()
+                patched = _raw_bytes[0]
+                total_patched = 0
+                for col_map, col_idx in (
+                    (price_map, PRICE_COL), (disc_map, DISC_COL),
+                    (status_map, STATUS_COL), (stock_map, STOCK_COL),
+                ):
+                    if col_idx is None:
+                        continue
+                    patched, n = await loop.run_in_executor(
+                        None, _patch_xlsx_prices, patched, col_map, col_idx
+                    )
+                    total_patched += n
             except Exception as ex:
                 ui.notify(f"❌ 파일 패치 실패: {ex}", color="negative")
                 return
-            if _n_patched == 0:
-                def _cl(n):
-                    s = ""
-                    while n > 0:
-                        n, r2 = divmod(n - 1, 26)
-                        s = chr(65 + r2) + s
-                    return s
-                ui.notify(f"⚠️ 셀 패치 0개 — 기입열:{_cl(PRICE_COL)} 매칭:{len(row_price_map)}개. "
+            if total_patched == 0:
+                ui.notify(f"⚠️ 셀 패치 0개 — 매칭 {len(price_map)}개. "
                           "Wing 엑셀 구조가 다를 수 있으니 스크린샷 찍어 공유해주세요.",
                           color="warning", timeout=20000)
                 return
 
-            orig_ext  = _Path2(_fname_holder["v"]).suffix.lower() or ".xlsx"
-            orig_stem = _Path2(_fname_holder["v"]).stem
-            dl_name   = f"{orig_stem}_가격수정{orig_ext}"
+            orig_ext = _Path2(_fname_holder["v"]).suffix.lower() or ".xlsx"
+            # Wing이 다운로드 시 발급한 파일명과 업로드 파일명을 대조할 가능성이 있어
+            # "_가격수정" 접미사 없이 원본 파일명 그대로 재사용
+            dl_name  = _fname_holder["v"] or f"price_fix{orig_ext}"
 
             import base64 as _b64
             b64 = _b64.b64encode(patched).decode()
@@ -10927,18 +11240,21 @@ def page_price_fix() -> None:
                 a.click();
                 document.body.removeChild(a);
             """)
-            ui.notify(f"✅ {dl_name} 다운로드 시작! (셀 패치 {_n_patched}개 / 매칭 {len(row_price_map)}개)", color="positive")
+            ui.notify(f"✅ {dl_name} 다운로드 시작! (행 {len(price_map)}개 × 4칸, 총 셀 패치 {total_patched}개)", color="positive")
 
         # 업로드 컴포넌트
         with ui.card().classes("shadow-sm w-full mb-3"):
             with ui.card_section():
                 ui.upload(
-                    label="Wing 엑셀 파일 (.xlsx)",
+                    label="Wing 엑셀 파일 (.xlsx / .xlsm)",
                     on_upload=_on_upload,
                     auto_upload=True,
-                ).props('accept=".xlsx" flat bordered').classes("w-full")
+                ).props('accept=".xlsx,.xlsm" flat bordered').classes("w-full")
 
         dl_row  # 다운로드 버튼 자리
+
+        _render_id_copy()
+        _render_soldout()
 
 
 def _check_local_token(request: _FastAPIRequest) -> bool:
