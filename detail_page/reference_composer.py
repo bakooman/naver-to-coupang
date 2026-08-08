@@ -1,29 +1,23 @@
 """
 reference_composer.py — 실제 스마트스토어 상세페이지 이미지를 참고해 완전히 새로 그린
-고가상품 전용 상세페이지 생성 (레퍼런스 이미지 1장 = 섹션 1개).
+고가상품 전용 상세페이지 생성 (레퍼런스 이미지 1장 = 섹션 1개, 순서대로 처리).
 
-카처 상품 테스트 때 퀄리티가 낮고 "합성 티"가 났던 원인은 section_director.py가
-상품명+스펙 텍스트만으로 섹션 구도를 상상해서 만드는 구조였기 때문 — 실제 레퍼런스
-이미지를 구도/그래픽 재현에 쓰지 않았다.
+이전 버전은 "문구 추출 → 리라이트 → (섹션타입별 분기) 이미지 재생성 → PIL 오버레이"
+4단계 파이프라인이었으나, 섹션타입 분류가 부정확해 정보그래픽 텍스트가 깨지거나
+반대로 제품사진 없이 빈 배경만 나오는 문제가 있었다.
 
-이 모듈은 다르게 접근한다:
-  1. image_reader.read_product_info_from_images() — 레퍼런스 이미지에서 실제로
-     읽히는 문구/스펙만 추출 (할루시네이션 방지 이미 내장된 기존 함수 재사용)
-  2. Gemini 텍스트 모델로 문구 리라이트 — 같은 정보, 다른 표현 ("말만 조금 바꿔서")
-  3. Gemini 이미지 모델로 그 섹션을 완전히 새로 그림 — 레퍼런스 이미지를 구도/분위기
-     앵커로 첨부하되, 문단 텍스트는 이미지 안에 절대 굽지 않도록 강제
-     (새 한글 문단을 이미지 모델이 직접 렌더링하다 깨지는 리스크 원천 차단)
-  4. text_overlay.apply_overlay() — 검증된 PIL 렌더러로 리라이트된 문구를 얹음
-  5. 전체 섹션을 세로로 이어붙여 완성
+실제로 사용자가 Gemini 이미지 생성에 원본 섹션 이미지를 한 장씩 던지며 프롬프트를
+다듬어본 결과, "문구를 한 글자씩 그대로 베끼지 말고 자연스럽게 다른 표현으로 바꿔서
+이미지 모델이 직접 텍스트까지 그려 넣게" 하는 단일 호출 방식이 훨씬 안정적이었다.
+이 모듈은 그 방식을 그대로 코드화한다 — 섹션마다 Gemini 이미지 모델 호출 1번으로
+완결(별도 문구 추출/리라이트/오버레이 단계 없음).
 
-지적재산권 리스크 방지: 실제 이미지를 그대로/거의 그대로 재사용하지 않고,
-매 섹션을 새 이미지로 재생성한다 (Option B).
+지적재산권 리스크 방지: 제품은 같은 것으로 알아볼 수 있게 유지하되, 사진을 그대로
+재사용하지 않고 글씨체·배경·각도·조명을 다르게 해서 매 섹션을 새 이미지로 생성한다.
 """
 from __future__ import annotations
 
 import io
-import json
-import re
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -31,12 +25,58 @@ from typing import Optional
 from PIL import Image
 
 from .composer import _stack_vertical
-from .image_reader import read_product_info_from_images
-from .section_generator import _CANVAS_W, _CANVAS_H, _resize_to_canvas, _mime_of
-from .text_overlay import apply_overlay, OverlayConfig
+from .section_generator import _CANVAS_W, _CANVAS_H
+from .text_overlay import overlay_body_text, append_disclaimer
+
+_DISCLAIMER_TEXT = "본 상세페이지의 제품 이미지는 이해를 돕기 위한 것으로 실제 상품과 다소 차이가 있을 수 있습니다."
 
 _PRIMARY_MODEL  = "gemini-3-pro-image"
 _FALLBACK_MODEL = "gemini-3.1-flash-image"
+
+# 다른 스토어 원본처럼 여러 내용이 세로로 길게 뭉쳐있는 레퍼런스를 그대로
+# 고정 9:16(780×1386) 캔버스에 욱여넣으면 내용이 크게 잘려나가던 문제 —
+# 레퍼런스 자체의 세로 비율만큼 출력 캔버스도 키운다 (상한 있음).
+_MAX_CANVAS_H = _CANVAS_H * 3
+
+
+def _target_size(ref_path: str) -> tuple[int, int]:
+    try:
+        with Image.open(ref_path) as im:
+            rw, rh = im.size
+        if not rw:
+            return _CANVAS_W, _CANVAS_H
+        h = round(_CANVAS_W * (rh / rw))
+        h = max(_CANVAS_H, min(h, _MAX_CANVAS_H))
+        return _CANVAS_W, h
+    except Exception:
+        return _CANVAS_W, _CANVAS_H
+
+
+def _resize_to_size(img: Image.Image, w: int, h: int) -> Image.Image:
+    canvas = Image.new("RGB", (w, h), (255, 255, 255))
+    img = img.copy()
+    img.thumbnail((w, h), Image.LANCZOS)
+    x = (w - img.width)  // 2
+    y = (h - img.height) // 2
+    canvas.paste(img, (x, y))
+    return canvas
+
+
+# 다른 스토어에서 올린 원본 중 극단적으로 세로가 긴 이미지(예: 848×20541,
+# 24:1 비율)를 그대로 첨부하면 gemini-3-pro-image / gemini-3.1-flash-image
+# 둘 다 400 INVALID_ARGUMENT로 거부하는 것을 실제로 확인함 — 참조용으로
+# 보낼 때는 비율은 유지한 채 최장변만 안전한 크기로 눌러서 보낸다.
+_MAX_REF_DIM = 5000
+
+
+def _load_ref_bytes(ref_path: str) -> tuple[bytes, str]:
+    with Image.open(ref_path) as im:
+        im = im.convert("RGB")
+        if max(im.size) > _MAX_REF_DIM:
+            im.thumbnail((_MAX_REF_DIM, _MAX_REF_DIM), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=90)
+        return buf.getvalue(), "image/jpeg"
 
 _DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "images" / "detail_pages"
 
@@ -50,18 +90,69 @@ _BANNED_PHRASES_BLOCK = """[절대 금지 표현 — 신규 문구에도 동일 
 - 영양성분 강조: 무설탕·저칼로리·무첨가·저나트륨 등 식약처 인증 없이 강조 금지
 - 유통사·수입사·판매처·소싱처·공급원 등 유통 관련 정보 절대 언급 금지"""
 
+# 사용자가 실제 Gemini 이미지 생성으로 검증한 프롬프트를 코드화. 핵심은 규칙 3 —
+# "한 글자씩 그대로 베끼지 말 것". 처음엔 원본을 너무 충실히 따라 하려다 보니 오타가
+# 심했고, 이 지시를 추가한 뒤로 품질이 크게 개선됨(사용자 확인).
+#
+# 규칙 2(짧은 텍스트만 이미지에 직접) — 실사용 테스트에서 제목/라벨/숫자(10자 이내)는
+# 이미지 모델이 정확히 그려내지만, 후기 인용구·설명문처럼 문장이 길어지면 글자가
+# 심하게 깨지는 것을 확인함(예: "균형"→"균혈", "필터를 수평으로"→"릴터를 수렁으로").
+# 그래서 긴 본문은 이미지에 굽지 않고 별도 텍스트로 받아 오타 0% PIL 렌더러
+# (text_overlay.overlay_body_text)로 얹는다.
+_GENERATION_PROMPT_TMPL = """당신은 쿠팡 상세페이지 이미지를 새로 만드는 디자이너입니다.
+
+첨부한 이미지는 실제 상품 상세페이지의 한 섹션입니다. 이 이미지를 참고해서 아래 조건에 맞는
+새 이미지를 만들어 주세요.
+
+[규칙]
+1. 상품 자체는 원본과 같은 제품으로 알아볼 수 있게 유지하되, 사진을 그대로 베끼지 말고
+   글씨체·배경·각도·조명을 원본과 다르게 해서 완전히 새로 그린 이미지를 만드세요.
+   (지적재산권 문제 없는 원본 이미지여야 합니다)
+2. 단, 레퍼런스에 실제로 보이는 제품의 형태·색상·라벨 디자인·비율은 최대한 정확하게
+   유지하세요. 각도를 바꾸면서 레퍼런스에 안 보이는 부분(반대쪽 면 등)만 자연스럽게
+   최소한으로 추정하고, 레퍼런스에 이미 보이는 부분까지 임의로 다른 디자인으로
+   바꾸지 마세요.
+3. 제목·라벨·숫자·짧은 캡션(10자 이내)은 이미지 안에 직접 그려 넣어도 됩니다. 단, 2문장
+   이상 되는 긴 설명 문구나 후기 인용구처럼 문장이 긴 텍스트는 이미지 안에 그리지 마세요
+   (글자 수가 많아질수록 이미지 생성 모델이 오타를 낼 위험이 커집니다). 그런 긴 문구가
+   있다면 이미지에는 넣지 말고 아래 [텍스트 응답] 규칙에 따라 텍스트로만 반환하세요.
+4. 원본 문구를 한 글자씩 그대로 따라 하지 마세요. 같은 내용을 자연스럽게 다른 표현으로
+   바꾸세요.
+5. 용량·중량·호환모델·수치 등 핵심 스펙 정보는 원본 값 그대로 유지하세요. 다른 숫자로
+   바꾸거나 지어내지 마세요.
+6. 이미지에 상품명이 등장한다면 반드시 "{product_name}"로 표기하세요 (원본에 다른 이름이
+   있어도 이 이름으로 교체).
+7. 유통사·수입사·판매처·소싱처 등 유통 관련 정보는 이미지에 넣지 마세요.
+8. 레퍼런스는 원래 다른 판매자가 올린 것입니다. 그 판매자 개인·매장에만 해당하는 표현은
+   절대 가져오지 마세요 — 배송 소요일/배송비 안내, "정식 수입/정품 보장", "가품을 팔지
+   않습니다" 같은 신뢰 문구, "오직 OO스토어에서만 구매 가능"처럼 특정 스토어 한정·독점을
+   암시하는 표현 등은 전부 무시하고 이미지에도, 텍스트 응답에도 넣지 마세요.
+9. 레퍼런스에 담긴 정보량이 많다면(여러 포인트·설명이 한 이미지에 뭉쳐있는 경우)
+   요약해서 줄이지 말고 최소 70% 이상은 살려서 재구성하세요. 필요하면 세로로 여러
+   블록을 이어서 배치해 다 담아도 됩니다 — 정보를 잘라내는 것보다 이미지를 길게
+   만드는 쪽을 우선하세요.
+{banned}
+
+[텍스트 응답 — 이미지와 별도로]
+규칙 3에 따라 긴 설명 문구나 후기 인용구를 이미지에 넣지 않기로 했다면, 그 내용은
+반드시 여기 텍스트 응답에 새로운 표현으로 재구성해서 포함하세요. 다른 설명·인사말 없이
+본문 문구만 작성하세요(2~4문장, 줄바꿈 가능). 섹션 제목이나 구성상 후기·경험담·설명이
+있어야 하는데 내용을 통째로 비워서 반환하는 것은 금지됩니다. 정말 긴 문구가 전혀 없는
+섹션일 때만 텍스트 응답을 비워두세요.
+
+세로 비율 약 {aspect_hint}, 고급스러운 커머스 상세페이지 품질로 이미지를 만들어주세요."""
+
 
 def generate_detail_page_from_reference(
     reference_image_paths: list[str],
     product_name: str,
     api_key: str,
     output_dir: Optional[str] = None,
-    text_model: str = "gemini-2.5-flash",
     progress_cb=None,
 ) -> str:
     """
     레퍼런스 이미지들(실제 스마트스토어 상세페이지 캡처)을 참고해 완전히 새로운
-    상세페이지 이미지를 생성. 이미지 1장 = 섹션 1개로 그대로 매칭.
+    상세페이지 이미지를 생성. 이미지 1장 = 섹션 1개, 받은 순서 그대로 처리.
 
     Returns:
         저장된 이미지 파일 경로. 실패 시 빈 문자열.
@@ -88,45 +179,16 @@ def generate_detail_page_from_reference(
                 pass
         print(f"[RefComposer] ({step}/{total_steps}) {msg}")
 
-    # 상품 성격에 맞는 디자인 스타일(폰트체·포인트컬러) 1회 결정 —
-    # 전 섹션에 동일 적용해 한 페이지 안에서 통일감 유지
-    style = _pick_style(product_name, api_key, text_model)
-    print(f"[RefComposer] 디자인 스타일: {style}")
-
     section_images: list[Image.Image] = []
 
     for i, ref_path in enumerate(valid_paths):
         step_no = i + 1
-        _progress(step_no, f"섹션 {step_no}/{len(valid_paths)} — 원본 내용 확인 중...")
-
-        # ── 1. 이 섹션의 실제 문구/스펙 추출 (기존 함수, 할루시네이션 방지 내장) ──
-        info = read_product_info_from_images([ref_path], api_key, model=text_model)
-        source_facts = _format_facts(info)
-
-        # ── 2. 문구 리라이트 (같은 정보, 다른 표현) — section_type도 함께 판단 ──
-        _progress(step_no, f"섹션 {step_no}/{len(valid_paths)} — 문구 재구성 중...")
-        rewritten = _rewrite_copy(product_name, source_facts, api_key, text_model)
-        stype = rewritten.get("section_type", "hero")
-
-        # ── 3. 이미지 재생성 (레퍼런스 앵커, 문단 텍스트 금지) ──────────
-        # specs/features(아이콘·다이어그램·표 위주)는 이미지 모델이 새로 그리다
-        # 텍스트가 깨지므로, 배경만 단순하게 생성하고 정보는 전부 PIL로만 얹는다.
-        _progress(step_no, f"섹션 {step_no}/{len(valid_paths)} — 이미지 재생성 중...")
-        img = _regenerate_section_image(ref_path, api_key, stype)
+        _progress(step_no, f"섹션 {step_no}/{len(valid_paths)} — 생성 중...")
+        img, body = _regenerate_section(ref_path, api_key, product_name)
         if img is None:
             img = Image.new("RGB", (_CANVAS_W, _CANVAS_H), (245, 245, 245))
-
-        # ── 4. 리라이트된 문구를 검증된 PIL 렌더러로 얹기 ───────────────
-        cfg = OverlayConfig(
-            title    = rewritten.get("title", ""),
-            subtitle = rewritten.get("subtitle", ""),
-            body     = rewritten.get("body", ""),
-            layout   = "full",
-            style    = style,
-        )
-        if cfg.title or cfg.subtitle or cfg.body:
-            img = apply_overlay(img, cfg, section_type=stype)
-
+        elif body:
+            img = overlay_body_text(img, body)
         section_images.append(img)
 
     if not section_images:
@@ -135,6 +197,7 @@ def generate_detail_page_from_reference(
 
     _progress(total_steps, "섹션 합성 중...")
     final_img = _stack_vertical(section_images)
+    final_img = append_disclaimer(final_img, _DISCLAIMER_TEXT)
 
     uid   = uuid.uuid4().hex[:10]
     fname = f"detail_page_ref_{uid}.jpg"
@@ -144,195 +207,44 @@ def generate_detail_page_from_reference(
     return str(fpath)
 
 
-def _format_facts(info: dict) -> str:
-    """image_reader 추출 결과를 프롬프트용 텍스트로 정리."""
-    lines = []
-    if info.get("product_name"):
-        lines.append(f"상품명: {info['product_name']}")
-    for k, v in (info.get("specs") or {}).items():
-        lines.append(f"- {k}: {v}")
-    for d in info.get("descriptions") or []:
-        lines.append(f"- {d}")
-    return "\n".join(lines) if lines else "(이 섹션에서 읽힌 텍스트 없음)"
-
-
-_VALID_STYLES = ("premium", "modern", "playful", "tech")
-
-
-def _pick_style(product_name: str, api_key: str, model: str) -> str:
-    """
-    상품 성격에 맞는 디자인 스타일(폰트체·포인트컬러 조합) 선택.
-    실패 시 "modern"(무난한 기본값) 반환 — 파이프라인 안 죽음.
-    """
-    try:
-        from google import genai
-
-        client = genai.Client(api_key=api_key)
-        prompt = f"""아래 상품에 가장 잘 어울리는 상세페이지 디자인 스타일을 하나만 고르세요.
-
-- premium: 고급스러운 느낌 (명조체·골드 포인트) — 프리미엄 가전, 명품, 건강기능식품 등
-- modern: 모던하고 심플한 느낌 (둥근 산세리프·블루 포인트) — IT기기, 생활가전, 일반 잡화
-- playful: 발랄하고 귀여운 느낌 (굵은 산세리프·코랄 포인트) — 캐릭터상품, 간식, 유아동 용품
-- tech: 파워풀하고 테크니컬한 느낌 (고딕·레드 포인트) — 공구, 전자기기, 스펙 강조 상품
-
-[상품명]
-{product_name}
-
-스타일 이름 하나만 답하세요 (premium/modern/playful/tech). 설명 금지."""
-        resp = client.models.generate_content(model=model, contents=prompt)
-        picked = (resp.text or "").strip().lower().split()[0] if (resp.text or "").strip() else ""
-        picked = "".join(ch for ch in picked if ch.isalpha())
-        return picked if picked in _VALID_STYLES else "modern"
-    except Exception as e:
-        print(f"[RefComposer] 스타일 선택 실패 (기본값 modern 사용): {e}")
-        return "modern"
-
-
-def _rewrite_copy(product_name: str, source_facts: str, api_key: str, model: str) -> dict:
-    """
-    원본 섹션에서 뽑은 실제 문구/스펙을 바탕으로, 같은 정보를 다른 표현으로
-    재구성. 섹션 레이아웃 타입도 함께 추론.
-
-    실패 시 안전한 기본값(빈 문구, hero 레이아웃) 반환 — 파이프라인 안 죽음.
-    """
-    try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=api_key)
-        prompt = f"""당신은 쿠팡 상세페이지 카피라이터입니다.
-아래는 원본 상세페이지 한 섹션에서 실제로 읽힌 내용입니다. 이 정보(사실관계)는
-절대 바꾸지 말고, 표현·문장 구조만 다르게 재구성해 새 문구를 만드세요.
-
-[규칙]
-1. 원본에 없는 수치·효능·기능을 새로 지어내지 마세요.
-2. 원본에 있는 사실(수치, 스펙, 기능 설명)은 반드시 그대로 유지하되 문장만 새로 쓰세요.
-3. 원본 내용이 비어있거나 의미없으면 title/subtitle/body를 빈 문자열로 반환하세요.
-{_BANNED_PHRASES_BLOCK}
-
-[section_type 판단 기준 — 하나만 선택]
-- "hero": 제품 대표 이미지 + 핵심 한 줄 소개
-- "features": 주요 특징 여러 개 나열
-- "specs": 스펙/수치/구성 정보 (표 형태 등)
-- "callout": 강조 포인트 클로즈업, 짧고 임팩트 있는 문구
-- "closing": 마무리, 브랜드 감성
-
-[원본 상품명]
-{product_name}
-
-[이 섹션 원본 내용]
-{source_facts}
-
-[출력 — JSON만, 다른 텍스트 없음]
-{{
-  "section_type": "hero|features|specs|callout|closing",
-  "title": "3~10자 핵심 문구 (한글, 없으면 빈 문자열)",
-  "subtitle": "10~25자 보조 문구 (한글, 없으면 빈 문자열)",
-  "body": "본문 2~4줄 (한글, 줄바꿈은 \\n, 없으면 빈 문자열)"
-}}"""
-        response = client.models.generate_content(
-            model=model, contents=[types.Part.from_text(text=prompt)]
-        )
-        raw = (response.text or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\s*```$", "", raw)
-        data = json.loads(raw)
-        return {
-            "section_type": str(data.get("section_type", "hero") or "hero"),
-            "title":        str(data.get("title", "") or ""),
-            "subtitle":     str(data.get("subtitle", "") or ""),
-            "body":         str(data.get("body", "") or ""),
-        }
-    except Exception as e:
-        print(f"[RefComposer] 문구 리라이트 실패: {e}")
-        return {"section_type": "hero", "title": "", "subtitle": "", "body": ""}
-
-
-# 사진 위주 섹션(hero/callout/closing) — 장면 전체를 새로 그림.
-# 실제로 텍스트 없는 제품사진 재현은 이미지 모델이 안정적으로 잘 해낸다(검증됨).
-_REFERENCE_STYLE_ANCHOR = (
-    "REFERENCE IMAGE: The attached image is a section from a real product detail "
-    "page. Use it ONLY as a style/composition/mood reference — recreate a brand-new "
-    "image inspired by its layout, color palette, and photographic style, but do NOT "
-    "reproduce it verbatim (this must be an original image, not a copy or lightly "
-    "edited version of the reference). "
-    "CRITICAL: Do NOT render any paragraph text, bullet points, or captions into the "
-    "image — the image must be completely free of body text. All wording will be "
-    "added separately afterward. If the reference contains diagrams or icons, you may "
-    "redraw similar (not identical) supporting graphics, but no readable paragraph "
-    "text of any kind. "
-    "The background/tone should look visibly different from the reference (different "
-    "color scheme or lighting), not like a lightly retouched copy of the original."
-)
-
-# 정보 위주 섹션(features/specs) — 아이콘·다이어그램·표를 이미지 모델이 다시
-# 그리게 하면 텍스트가 깨져서 아예 배경만 생성하고, 실제 정보는 전부 PIL
-# text_overlay로만 얹는다 (신뢰도 100%). 제품/도표/아이콘/텍스트 전부 금지.
-_BACKGROUND_ONLY_PROMPT = (
-    "Create a clean, elegant abstract background for a Korean e-commerce product "
-    "detail page section (9:16 vertical). "
-    "STRICT RULES:\n"
-    "1. NO products, objects, icons, diagrams, charts, tables, or any recognizable "
-    "shapes — completely empty scene.\n"
-    "2. NO text, letters, numbers, or symbols of any kind.\n"
-    "3. Simple studio backdrop: soft gradient, neutral solid color, or very subtle "
-    "texture (paper, fabric, soft light).\n"
-    "4. Tone should complement (but look distinct from) the reference image's color "
-    "palette — do not copy it exactly.\n"
-    "5. Soft even lighting, high-end commercial aesthetic, no dramatic shadows.\n"
-    "This background will have text and graphics added separately afterward — it "
-    "must stay completely empty and uncluttered."
-)
-
-
-def _regenerate_section_image(
-    ref_path: str, api_key: str, section_type: str = "hero"
-) -> Optional[Image.Image]:
-    """
-    레퍼런스 이미지를 앵커로 삼아 새 섹션 이미지를 생성.
-
-    section_type이 features/specs(정보·다이어그램 위주)면 배경만 단순하게
-    생성 — 이미지 모델이 표·아이콘·텍스트를 재현하려다 깨지는 것을 원천 차단.
-    나머지(hero/callout/closing, 사진 위주)는 장면 전체를 새로 그림.
-    """
+def _regenerate_section(
+    ref_path: str, api_key: str, product_name: str
+) -> tuple[Optional[Image.Image], str]:
+    """레퍼런스 이미지 한 장을 참고해 새 섹션 이미지를 단일 호출로 생성.
+    제목·라벨처럼 짧은 텍스트는 이미지 모델이 직접 그려 넣고, 긴 본문 문구는
+    이미지에 굽지 않고 별도 텍스트로 함께 반환받는다 (호출부에서 PIL로 오버레이)."""
     try:
         from google.genai import types
     except ImportError:
-        return None
+        return None, ""
 
-    info_heavy = section_type in ("features", "specs")
+    target_w, target_h = _target_size(ref_path)
+    prompt = _GENERATION_PROMPT_TMPL.format(
+        product_name=product_name,
+        banned=_BANNED_PHRASES_BLOCK,
+        aspect_hint=f"{target_w}:{target_h}",
+    )
 
     try:
-        mime = _mime_of(ref_path)
-        with open(ref_path, "rb") as f:
-            img_bytes = f.read()
-        if info_heavy:
-            parts = [
-                types.Part.from_bytes(data=img_bytes, mime_type=mime),
-                types.Part.from_text(text=_BACKGROUND_ONLY_PROMPT),
-            ]
-        else:
-            parts = [
-                types.Part.from_bytes(data=img_bytes, mime_type=mime),
-                types.Part.from_text(text=_REFERENCE_STYLE_ANCHOR),
-                types.Part.from_text(text=(
-                    "Create a professional 9:16 vertical product detail page section "
-                    "image for Korean e-commerce, high-end commercial photography "
-                    "quality, soft studio lighting. No text of any kind in the image."
-                )),
-            ]
+        img_bytes, mime = _load_ref_bytes(ref_path)
+        parts = [
+            types.Part.from_bytes(data=img_bytes, mime_type=mime),
+            types.Part.from_text(text=prompt),
+        ]
     except Exception as e:
         print(f"[RefComposer] 레퍼런스 이미지 로드 실패: {e}")
-        return None
+        return None, ""
 
-    img = _call_image_model(_PRIMARY_MODEL, parts, api_key)
+    img, body = _call_image_model(_PRIMARY_MODEL, parts, api_key, target_w, target_h)
     if img is None:
         print(f"[RefComposer] {_PRIMARY_MODEL} 실패 → {_FALLBACK_MODEL} 폴백")
-        img = _call_image_model(_FALLBACK_MODEL, parts, api_key)
-    return img
+        img, body = _call_image_model(_FALLBACK_MODEL, parts, api_key, target_w, target_h)
+    return img, body
 
 
-def _call_image_model(model: str, parts: list, api_key: str) -> Optional[Image.Image]:
+def _call_image_model(
+    model: str, parts: list, api_key: str, target_w: int, target_h: int
+) -> tuple[Optional[Image.Image], str]:
     try:
         from google import genai
         from google.genai import types
@@ -341,13 +253,22 @@ def _call_image_model(model: str, parts: list, api_key: str) -> Optional[Image.I
         response = client.models.generate_content(
             model    = model,
             contents = parts,
-            config   = types.GenerateContentConfig(response_modalities=["IMAGE", "TEXT"]),
+            config   = types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"],
+                # 어차피 _resize_to_size()로 다시 리사이즈되므로 2K/4K는
+                # 비용만 더 들고 이득이 없음 — 명시적으로 1K 고정
+                image_config=types.ImageConfig(image_size="1K"),
+            ),
         )
+        img: Optional[Image.Image] = None
+        text_out = ""
         for part in (response.candidates[0].content.parts if response.candidates else []):
-            if hasattr(part, "inline_data") and part.inline_data:
-                img = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
-                return _resize_to_canvas(img)
-        return None
+            if getattr(part, "inline_data", None):
+                raw = Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+                img = _resize_to_size(raw, target_w, target_h)
+            elif getattr(part, "text", None):
+                text_out += part.text
+        return img, text_out.strip()
     except Exception as e:
         print(f"[RefComposer] {model} 오류: {e}")
-        return None
+        return None, ""

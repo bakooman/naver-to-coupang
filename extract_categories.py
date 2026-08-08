@@ -5,7 +5,7 @@ Output: config/category_options.json
 """
 import pandas as pd, json, re, os
 
-GUIDE_FOLDER = r'C:\Users\pp\Desktop\해구대\Coupang_Category_20260311_1413 (1)'
+GUIDE_FOLDER = r'C:\Users\pp\Desktop\해구대\Coupang_Category_20260808_1413'
 CAT_MAP_PATH  = r'C:\Users\pp\Desktop\naver to coupang\config\category_map.json'
 OUT_PATH      = r'C:\Users\pp\Desktop\naver to coupang\config\category_options.json'
 
@@ -46,8 +46,17 @@ for fname in files:
         cat_id = m.group(1)
 
         # Purchase option types at cols 2, 4, 6, 8 (4 pairs: type + value)
+        # Cell may contain multiple lines, e.g.:
+        #   "엔진오일 SAE점도\n[필수]\n[기본단위: ...]"
+        #   "(택1) 개당 용량\n[필수]\n[기본단위: ml]"
+        # "(택N)" means "choose N of the options sharing the same N" — this is an
+        # OR relationship, NOT "all required". Options without "(택N)" and marked
+        # 필수 are genuinely all-required (AND). "[기본단위: X]" gives the unit
+        # Wing expects for that option's value.
         opt_types = []
-        req_types = []
+        req_types = []          # 진짜 AND-필수 (택N 아닌 것만)
+        choice_groups: dict[str, list] = {}   # 택N 번호 → [옵션타입, ...]
+        units: dict[str, str] = {}            # 옵션타입 → 기본단위
         for ci in [2, 4, 6, 8]:
             if ci >= ncols:
                 continue
@@ -57,18 +66,36 @@ for fname in files:
             t = str(t)
             if t == 'nan':
                 continue
-            # Cell may contain: "엔진오일 SAE점도\n[필수]\n[기본단위: ...]"
-            # or "(택1) 개당 용량\n[필수]\n[기본단위: ml]"
-            t_clean = t.split('\n')[0].strip()
-            if not t_clean:
+            lines = [ln.strip() for ln in t.split('\n') if ln.strip()]
+            if not lines:
                 continue
-            # Strip (택N) prefix so we get the actual option type name
-            # "(택1) 개당 용량" → "개당 용량"
-            t_normalized = re.sub(r'^\(택\d+\)\s*', '', t_clean)
+            t_clean = lines[0]
+
+            # "(택1) 개당 용량" → group="1", 옵션타입="개당 용량"
+            _taek_m = re.match(r'^\(택(\d+)\)\s*(.+)$', t_clean)
+            if _taek_m:
+                _group_no, t_normalized = _taek_m.group(1), _taek_m.group(2).strip()
+            else:
+                _group_no, t_normalized = None, t_clean
+
+            if not t_normalized:
+                continue
             if t_normalized not in opt_types:
                 opt_types.append(t_normalized)
+
+            # 기본단위 — 셀 전체 텍스트에서 검색 (라인 위치 무관)
+            _unit_m = re.search(r'\[기본단위\s*[:：]\s*([^\]]+)\]', t)
+            if _unit_m:
+                units[t_normalized] = _unit_m.group(1).strip()
+
             req_mark = str(req_row.iloc[ci]) if pd.notna(req_row.iloc[ci]) else ''
-            if '필수' in req_mark and t_normalized not in req_types:
+            is_required = '필수' in req_mark
+            if _group_no is not None:
+                if is_required:
+                    choice_groups.setdefault(_group_no, [])
+                    if t_normalized not in choice_groups[_group_no]:
+                        choice_groups[_group_no].append(t_normalized)
+            elif is_required and t_normalized not in req_types:
                 req_types.append(t_normalized)
 
         # gosisi_cat at col 150 (empty in guide data rows — filled by user)
@@ -95,6 +122,10 @@ for fname in files:
             'gosisi_cat': gosisi,
             'valid_options': opt_types,
             'required_options': req_types,
+            # 택N 그룹: 이 중 하나만 선택해야 하는 옵션타입 묶음 (OR 관계)
+            'choice_groups': list(choice_groups.values()) if choice_groups else [],
+            # 옵션타입 → 가이드에 명시된 기본단위 (예: "개당 수량": "매")
+            'units': units,
             'notice_fields': notice_fields,
             'source': fname
         }

@@ -32,7 +32,6 @@ from nicegui import app as _app, ui
 from config.settings import Settings
 from modules.crawler import NaverStoreCrawler, ProductData
 from modules.image_processor import ImageProcessor
-from modules.ai_bg_regen import regenerate_background
 from modules.price_calculator import PriceCalculator
 from modules.image_uploader import upload_pil, upload_file, upload_url
 from modules.excel_builder import ExcelBuilder, BulkItem, Bundle
@@ -328,6 +327,56 @@ def _guide_gosisi_cat(category_id: str) -> str:
     """가이드 파일 기준 gosisi_cat 반환."""
     return _CAT_OPTIONS.get(category_id, {}).get("gosisi_cat", "")
 
+# ── 택1 그룹(choice_groups) 정리 ────────────────────────────────────
+# Wing 가이드의 "(택N)" 표기 — 그룹 내 옵션 중 하나만 선택해야 함(OR).
+# 예전엔 "개당 중량"/"개당 용량" 쌍만 하드코딩으로 처리했으나, 2026-08-08
+# 가이드 재추출로 choice_groups가 카테고리별로 정확히 채워져 전체 스토어/
+# 전체 카테고리(16,400개)에 범용 적용 가능해짐 (최소 중량/최소 용량 등
+# 다른 조합도 자동 처리).
+_WT_TYPE_NAMES = {"개당 중량", "중량", "무게", "순중량", "최소 중량"}
+_VL_TYPE_NAMES = {"개당 용량", "용량", "내용량", "최소 용량"}
+
+def _resolve_choice_groups(
+    extra_options: list[tuple[str, str]], category_id: str,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """
+    category_options.json의 choice_groups(택1 그룹)에 따라 중복 기입된
+    옵션을 하나만 남기고 정리. 중량/용량 조합이면 액체 판정(≥50ml)으로
+    선택, 그 외 조합은 먼저 채워진 값을 유지.
+
+    Returns: (정리된 extra_options, 로그 메시지 목록)
+    """
+    groups = _CAT_OPTIONS.get(category_id, {}).get("choice_groups", []) if category_id else []
+    if not groups:
+        return extra_options, []
+
+    result = list(extra_options)
+    messages: list[str] = []
+    for group in groups:
+        present = [(t, v) for t, v in result if t in group]
+        if len(present) <= 1:
+            continue
+
+        wt_item = next((tv for tv in present if tv[0] in _WT_TYPE_NAMES), None)
+        vl_item = next((tv for tv in present if tv[0] in _VL_TYPE_NAMES), None)
+        if wt_item and vl_item and len(present) == 2:
+            try:
+                _vn = float(re.sub(r'[^\d.]', '', vl_item[1]) or "0")
+                _vu = re.sub(r'[\d. ]', '', vl_item[1]).lower()
+                _is_liquid = (_vn * 1000.0 if _vu == 'l' else _vn) >= 50
+            except Exception:
+                _is_liquid = False
+            keep = vl_item if _is_liquid else wt_item
+        else:
+            keep = present[0]
+
+        remove_types = {t for t, _ in present if t != keep[0]}
+        result = [(t, v) for t, v in result if t not in remove_types]
+        messages.append(
+            f"택1 그룹 정리: {[t for t, _ in present]} 중 '{keep[0]}'={keep[1]} 유지"
+        )
+    return result, messages
+
 # ── SSH 터널 (선택 기능 — Coupang API 직접 호출 필요 시) ──────────
 _SSH_PORT = getattr(_settings, "SOCKS5_PORT", 1081)
 _ssh_proc: subprocess.Popen | None = None
@@ -413,7 +462,7 @@ class QueueEntry:
     min_qty:           int  = 1           # 최솟값 (기본 1개, 수정 가능)
     draft:             bool = False       # True = Wing 임시저장 (판매시작일 공란 → 상세페이지 직접 수정)
     use_nobg:          bool = False       # 항목별 누끼 설정 (파일 업로드 시점에 저장)
-    ai_bg_regen:       bool = False       # True = 로컬 누끼 대신 Gemini AI 배경 재생성 사용
+    skip_gemini_detail: bool = False      # True = Gemini 판매멘트 생성 스킵 (직접 만든 상세이미지 그대로 사용)
     gtin:              str  = ""          # 바코드(GTIN) — GS1 Korea 자동조회 or 수동입력
     naver_price:       int  = 0           # 네이버 크롤링 원가(1개 기준) — 가격감시 기준가용
     source_file:       str  = ""          # 출처 파일명 (.txt) or "" (단일 URL 직접 입력)
@@ -981,6 +1030,34 @@ def _excel_issues(entry: "QueueEntry") -> list[dict]:
                     "fixable": False,
                 })
 
+    # 8-b. 필수 구매옵션 누락 검증 (가이드 파일 기준 — required_options + 택1 그룹)
+    # 예) "개당 중량"/"개당 용량" 택1 그룹인데 둘 다 없음 → Wing "필수 구매 옵션이
+    # 존재하지 않습니다" 오류로 반려됨 (2026-08-08 실사용 확인)
+    if item and entry.category_id:
+        _cat_cfg_chk = _CAT_OPTIONS.get(entry.category_id, {})
+        _existing_types_chk = {t for t, _ in item.extra_options}
+        _qty_synonyms_chk = {"수량", "총 수량", "총수량", "수량(개)", "개수"}
+        _missing_req = [
+            r for r in _cat_cfg_chk.get("required_options", [])
+            if r not in _existing_types_chk and r not in _qty_synonyms_chk
+        ]
+        _missing_groups = [
+            g for g in _cat_cfg_chk.get("choice_groups", [])
+            if g and not any(m in _existing_types_chk for m in g)
+        ]
+        if _missing_req or _missing_groups:
+            _msg_parts = []
+            if _missing_req:
+                _msg_parts.append(f"필수 옵션 누락: {_missing_req}")
+            if _missing_groups:
+                _msg_parts.append(f"택1 옵션 미선택: {[' / '.join(g) for g in _missing_groups]}")
+            issues.append({
+                "field": "extra_options",
+                "msg": " / ".join(_msg_parts) + " — Wing 업로드 실패 원인",
+                "severity": "critical",
+                "fixable": False,
+            })
+
     # 9. gosisi_cat 자동 보정 (가이드 파일 기준) — 오류 대신 조용히 덮어씀
     if item and entry.category_id:
         _guide_gcat = _guide_gosisi_cat(entry.category_id)
@@ -1021,7 +1098,7 @@ def _volume_to_max_qty(volume_l: float) -> int:
 # ── 상품명에서 용량 파싱 → L 환산 ──────────────────────────────────
 _VOL_RE = _re.compile(
     r'(\d+(?:[.,]\d+)?)\s*'                          # 숫자 (소수 포함)
-    r'(L|리터|ℓ|ml|mL|ML|밀리리터|cc|CC|㎖|㎗|qt|QT|gal|GAL|oz|OZ|fl\.?\s*oz)',
+    r'(L|리터|ℓ|ml|mL|ML|밀리리터|cc|CC|㎖|㎗|qt|QT|gal|GAL|갤런|oz|OZ|fl\.?\s*oz)',
     _re.IGNORECASE,
 )
 
@@ -1031,24 +1108,41 @@ _VOL_TO_L: dict[str, float] = {
     "ml": 0.001, "milliliter": 0.001, "밀리리터": 0.001, "㎖": 0.001,
     "cc": 0.001,
     "㎗": 0.1,
-    "qt": 0.946,   # US quart (946ml)
-    "gal": 3.785,  # US gallon
-    "oz": 0.02957, # fl oz
+    "qt": 0.946,     # US quart (946ml)
+    "gal": 3.785,    # US gallon (3785ml)
+    "갤런": 3.785,   # US gallon 한글 표기
+    "oz": 0.02957,   # fl oz
     "fl oz": 0.02957,
     "fl.oz": 0.02957,
 }
 
+# ml/L(및 그 한글·기호 표기)은 원래 값 그대로 유지 — 그 외 단위(qt·gal·갤런·oz·cc·㎗ 등)는
+# 쿠팡 "개당 용량" 옵션 드롭다운이 ml/L만 지원하므로 항상 ml로 환산.
+# 그대로 기입 시 "노출제한" 처리됨 (2026-08-06 확인, 모빌원 1qt·캐스트롤 1l 사례).
+_VOL_ML_KEYS = {"ml", "milliliter", "밀리리터", "㎖"}
+_VOL_L_KEYS  = {"l", "리터", "ℓ"}
+
+def _to_coupang_volume(raw_val: float, unit_key: str, vol_l: float) -> tuple[float, str]:
+    """쿠팡이 지원하는 ml/L 단위로 환산. 이미 ml/L 표기면 원값 그대로, 그 외는 ml로 환산."""
+    if unit_key in _VOL_ML_KEYS:
+        return raw_val, "ml"
+    if unit_key in _VOL_L_KEYS:
+        return raw_val, "L"
+    return round(vol_l * 1000, 1), "ml"
+
+
 def _parse_volume(text: str) -> tuple[float, str, float]:
     """
-    상품명에서 첫 번째 용량 표기 추출 → (원본값, 원본단위, L환산값).
+    상품명에서 첫 번째 용량 표기 추출 → (쿠팡표시값, 쿠팡표시단위(ml/L), L환산값).
+    쿠팡 옵션 드롭다운이 ml/L만 지원하므로 qt·gal·갤런·oz·cc·㎗ 등은 ml로 환산해 반환.
     감지 실패 시 (0.0, "", 0.0) 반환.
 
     예시:
-      "300ml"   → (300.0, "ml",  0.3)
-      "946ml"   → (946.0, "ml",  0.946)
-      "3.78L"   → (3.78,  "L",   3.78)
-      "1 qt"    → (1.0,   "qt",  0.946)
-      "1 gal"   → (1.0,   "gal", 3.785)
+      "300ml"   → (300.0,  "ml", 0.3)
+      "946ml"   → (946.0,  "ml", 0.946)
+      "3.78L"   → (3.78,   "L",  3.78)
+      "1 qt"    → (946.0,  "ml", 0.946)    ← qt는 쿠팡 미지원 단위라 ml로 환산
+      "1 gal"   → (3785.0, "ml", 3.785)    ← gal(갤런)도 마찬가지
     """
     # 부정 lookahead: 바로 뒤가 한글 어미(당, 짜리 등)나 알파벳이면 건너뜀
     for m in _VOL_RE.finditer(text):
@@ -1066,7 +1160,8 @@ def _parse_volume(text: str) -> tuple[float, str, float]:
         if factor == 0.0:
             continue
         vol_l = raw_val * factor
-        return (raw_val, raw_unit, vol_l)
+        disp_val, disp_unit = _to_coupang_volume(raw_val, unit_key, vol_l)
+        return (disp_val, disp_unit, vol_l)
     return (0.0, "", 0.0)
 
 
@@ -1215,6 +1310,17 @@ def _parse_weight_from_json(raw_json: dict) -> tuple[float, str, float]:
     return 0.0, "", 0.0
 
 
+def _derive_weight_from_volume(vol_rv: float, vol_ru: str) -> tuple[float, str, float]:
+    """액체 제품의 용량(ml/L)을 밀도 1로 간주해 중량(g)으로 환산.
+
+    raw_json의 중량 필드는 병·포장재 무게가 포함된 경우가 많아
+    (예: 15ml 에센셜오일인데 50g으로 표기) 신뢰할 수 없음 — 용량이 파악되면
+    그 값을 그대로 g으로 사용한다.
+    """
+    vol_ml = vol_rv * 1000.0 if vol_ru.lower() == "l" else vol_rv
+    return vol_ml, "g", vol_ml
+
+
 def _parse_volume_from_json(raw_json: dict) -> tuple[float, str, float]:
     """raw_json 스펙 속성에서 용량 표기 탐색 → _parse_volume() 위임."""
 
@@ -1232,6 +1338,23 @@ def _parse_volume_from_json(raw_json: dict) -> tuple[float, str, float]:
                 rv, ru, rl = _parse_volume(f"{_total}{_unit}")
                 if rl > 0:
                     return rv, ru, rl
+    except Exception:
+        pass
+
+    # ── Naver 전용: simpleProductForDetailPage.A.naverShoppingSearchInfo.modelName ──
+    # 상품명에 용량 표기가 없어도 "모델명"에 적어두는 판매자가 많음
+    # (예: 상품명 "폭스 엔진오일 5W30 (SQ C2/C3)" / 모델명 "엔진오일 5W30 1L")
+    try:
+        _model_name = (
+            (raw_json.get("simpleProductForDetailPage") or {})
+            .get("A", {})
+            .get("naverShoppingSearchInfo", {})
+            .get("modelName") or ""
+        )
+        if _model_name:
+            rv, ru, rl = _parse_volume(str(_model_name))
+            if rl > 0:
+                return rv, ru, rl
     except Exception:
         pass
 
@@ -1484,7 +1607,11 @@ async def _gemini_fill_required_options(
 
     # ── 옵션별 단위 가이드 ───────────────────────────────────────────
     _UNIT_GUIDE = {
-        "개당 중량":  "숫자+단위. 단위는 g 또는 kg만 허용. 예: 112g, 500g, 1kg, 1.5kg",
+        "개당 중량":  (
+            "숫자+단위. 단위는 g 또는 kg만 허용. 예: 112g, 500g, 1kg, 1.5kg\n"
+            "    ⚠ 액상 제품은 병·용기·포장 무게를 포함하지 말고 내용물 중량만 기입하세요.\n"
+            "    ⚠ 스펙에 용량(ml/L)이 있다면 밀도 1로 간주해 동일한 숫자를 g으로 사용하세요 (예: 15ml → 15g)."
+        ),
         "개당 캡슐/정": (
             "정수+단위. 예: 30정, 60캡슐, 90개입\n"
             "    ⚠ 액상 제품(시럽·오일·음료·액체 등)에는 이 항목을 JSON에서 완전히 제외하세요.\n"
@@ -1903,63 +2030,9 @@ def _clean_product_name(name: str) -> str:
 
 
 # ── 상품명 금지 키워드 감지 ───────────────────────────────────────
-import re as _re_name
-
-_BANNED_NAME_PATTERN = _re_name.compile(
-    r'(?<![a-zA-Z0-9])'          # 영숫자 복합어 내부 오탐 방지
-    r'('
-    # ── 기존: 순위·최상급·과장 ──────────────────────────────────────
-    r'\d+위'                                          # 순위: 1위, 2위
-    r'|(?:국내|세계|전국|판매|인기|아시아)?\s*(?:최고|최초|최대|최강|최상|최저|최소)(?!급|한|대한|소한|단|소)'
-    r'|특효(?:약|과)?'
-    r'|부작용\s*(?:없|zero|제로)'
-    r'|(?:전문가|의사|약사|피부과)\s*추천'
-    r'|완치|치료(?:제|약|효과)?'
-    r'|기적|혁신적|압도적'
-    r'|무조건\s*(?:효과|추천|보장)'
-    r'|효과\s*보장|100%\s*효과'
-    # ── 식품표시광고법: 질병 예방·치료 오인 ─────────────────────────
-    r'|당뇨(?:병|예방|개선|완화)?'
-    r'|고혈압(?:예방|개선|완화)?'
-    r'|혈당\s*(?:강하|안정|조절|개선)'
-    r'|혈압\s*(?:강하|낮추|조절|개선)'
-    r'|항암(?:효과|작용)?'
-    r'|항염(?:효과|작용)?'
-    r'|암\s*(?:예방|억제|치료|발생방지)'
-    r'|아토피\s*(?:개선|완화|치료)?'
-    r'|생리통\s*(?:완화|개선)?|생리불순'
-    r'|탈모\s*(?:방지|예방|개선|치료)'
-    r'|골다공증|고지혈증|치매\s*예방'
-    r'|변비\s*(?:개선|해소|완화)|쾌변'
-    r'|소화\s*(?:불량|개선)|소화성\s*궤양'
-    r'|수족냉증\s*완화|갱년기\s*(?:개선|완화)'
-    # ── 식품표시광고법: 건강기능식품 오인 ───────────────────────────
-    r'|다이어트\s*(?:커피|음료|식품|보조|효과)?(?=\s)'
-                                                      # "다이어트 용품·가방" 등 일반 명사 앞에선 허용
-    r'|체중\s*감량|지방\s*분해|식욕\s*억제'
-    r'|면역력\s*(?:증진|향상|강화|개선)'
-    r'|혈액순환\s*(?:개선|촉진)'
-    r'|간\s*기능\s*(?:개선|개선)'
-    r'|항산화\s*(?:효과|작용)?'
-    r'|키\s*(?:성장|크는|키우는)'
-    # ── 식품표시광고법: 한약 처방명 ─────────────────────────────────
-    r'|공진단|경옥고|쌍화탕|십전대보탕|사군자탕|사물탕'
-    r'|녹용대보탕|총명탕|귀비탕|육미지황탕|우황청심원'
-    r'|익수영진고|오자연종환'
-    # ── 표시광고법: 공산품 의료기기 오인 ───────────────────────────
-    r'|족저근막염|목디스크|거북목|일자목'
-    r'|발가락\s*교정(?:기)?|척추\s*교정'
-    r'|코골이\s*(?:방지|개선|치료)|수면무호흡'
-    r'|주름\s*(?:개선|치료|완화)'
-    r'|피부질환\s*(?:치료|완화|개선)'
-    r')'
-    r'(?:의|이|가|은|는|을|를|로|으로|적|인)?',       # 조사·접미어 포함 처리
-    _re_name.IGNORECASE,
-)
-
-def _has_banned_keyword(name: str) -> list[str]:
-    """상품명에서 금지 키워드 목록 반환. 없으면 빈 리스트."""
-    return [m.group(1) for m in _BANNED_NAME_PATTERN.finditer(name)]
+# (패턴은 modules/banned_keywords.py 공용 — 상세페이지 판매멘트 검증과 동일 목록 사용)
+from modules.banned_keywords import BANNED_PATTERN as _BANNED_NAME_PATTERN
+from modules.banned_keywords import has_banned_keyword as _has_banned_keyword
 
 
 # 상품명-옵션값 완전 중복 시 쿠팡이 노출을 낮추는 경향 방지용
@@ -2021,6 +2094,16 @@ async def _process_entry(
             )
         entry.product_name = product.name
         entry.naver_price  = product.price   # 네이버 원가(1개) — 가격감시 기준가용
+
+        # ── 건강기능식품 수집 거부 ───────────────────────────────────
+        # 건강기능식품 판매업 신고 전까지는 무조건 차단 — 대량 URL 수집 중
+        # 실수로 섞여 들어와도 여기서 원천적으로 걸러냄 (신고 완료 후 이 블록 제거)
+        _hff_check_text = f"{product.naver_category or ''} {product.name or ''}"
+        if "건강기능식품" in _hff_check_text:
+            raise ValueError(
+                f"수집거부: 건강기능식품 감지 (네이버 카테고리: {product.naver_category or '미확인'}) — "
+                f"건강기능식품 판매업 신고 전까지 등록 금지 대상입니다."
+            )
 
         # ── 코지타벨리니 전용: 영문 상품명 → 한글 변환 ─────────────────
         if "cositabellini" in entry.url.lower() and product.name:
@@ -2445,6 +2528,8 @@ async def _process_entry(
             # 수량은 잠금이지만 용량은 감지 — 옵션·경고 판정에 필요
             if entry.volume == 0:
                 _rv, _ru, _rl = _parse_volume(product.name)
+                if _rl == 0:
+                    _rv, _ru, _rl = _parse_volume_from_json(product.raw_json or {})
                 if _rl > 0:
                     entry.volume      = _rv
                     entry.volume_unit = _ru
@@ -2457,6 +2542,9 @@ async def _process_entry(
         elif entry.category_id == _VOL_QTY_CAT:
             # ── 엔진오일: 볼륨 기반 자동 수량 ─────────────────────
             _rv, _ru, _rl = _parse_volume(product.name)
+            if _rl == 0:
+                # 상품명에 용량 표기가 없으면 네이버 모델명 등 raw_json에서 재시도
+                _rv, _ru, _rl = _parse_volume_from_json(product.raw_json or {})
             if _rl > 0:
                 _auto_max = _volume_to_max_qty(_rl)
                 _mn = max(1, entry.min_qty)
@@ -2483,6 +2571,8 @@ async def _process_entry(
         else:
             # ── 일반 상품: 볼륨 저장 후 패널 입력 수량 사용 ──────────
             _rv, _ru, _rl = _parse_volume(product.name)
+            if _rl == 0:
+                _rv, _ru, _rl = _parse_volume_from_json(product.raw_json or {})
             if _rl > 0:
                 entry.volume      = _rv
                 entry.volume_unit = _ru
@@ -2623,50 +2713,6 @@ async def _process_entry(
         if _custom_img and Path(_custom_img).exists():
             log_(f"[{entry.uid[:6]}] 사용자 지정 대표이미지 사용: {Path(_custom_img).name}")
 
-        # ── 2-A. AI 배경 재생성 (Gemini) — 누끼 어려운 상품용 개별 옵션 ──
-        _ai_regen_used = False
-        if getattr(entry, "ai_bg_regen", False) and _src_img_path and not entry.single_mode:
-            _gk_bg = getattr(_settings, "GEMINI_API_KEY", "")
-            if _gk_bg:
-                # 중량/용량 정확한 값을 미리 파싱해 프롬프트에 전달 —
-                # 원본 사진에서 그람수가 접히거나 흐릿해 Gemini가 추측해서
-                # 다른 숫자를 인쇄하는 사고 방지 (예: 280g → 200g 오인식)
-                _spec_hint_parts = []
-                try:
-                    _wv, _wu, _wg = _parse_weight_from_json(product.raw_json or {})
-                    if _wg <= 0:
-                        _wv, _wu, _wg = _parse_weight(product.name)
-                    if _wg > 0:
-                        _spec_hint_parts.append(f"{_wv:g}{_wu}")
-                except Exception:
-                    pass
-                try:
-                    _vv, _vu, _vl = _parse_volume_from_json(product.raw_json or {})
-                    if _vl <= 0:
-                        _vv, _vu, _vl = _parse_volume(product.name)
-                    if _vl > 0:
-                        _spec_hint_parts.append(f"{_vv:g}{_vu}")
-                except Exception:
-                    pass
-                _spec_hint = " / ".join(_spec_hint_parts)
-
-                log_(f"[{entry.uid[:6]}] AI 배경 재생성 시작 (Gemini)..."
-                     + (f" [중량/용량 힌트: {_spec_hint}]" if _spec_hint else ""))
-                _ai_path = await loop.run_in_executor(
-                    None,
-                    partial(regenerate_background, _src_img_path,
-                            product.product_id, _gk_bg, _settings.IMAGE_AI_DIR,
-                            spec_hint=_spec_hint),
-                )
-                if _ai_path:
-                    _src_img_path = _ai_path
-                    _ai_regen_used = True
-                    log_(f"[{entry.uid[:6]}] AI 배경 재생성 완료: {Path(_ai_path).name}")
-                else:
-                    log_(f"[{entry.uid[:6]}] AI 배경 재생성 실패 — 기존 방식(누끼 {'ON' if use_nobg else 'OFF'})으로 진행")
-            else:
-                log_(f"[{entry.uid[:6]}] GEMINI_API_KEY 미설정 — AI 배경 재생성 스킵")
-
         if _src_img_path and not entry.single_mode:
             try:
                 proc = ImageProcessor(_settings, store=getattr(entry, "watch_store", "샵케이"))
@@ -2675,7 +2721,7 @@ async def _process_entry(
                     partial(proc.process, _src_img_path,
                             product.product_id, entry.qtys,
                             unit_label=getattr(entry, "badge_unit", "개") or "개",
-                            **({"skip_nobg": True} if (not use_nobg or _ai_regen_used) else {})),
+                            **({"skip_nobg": True} if not use_nobg else {})),
                 )
                 log_(f"[{entry.uid[:6]}] 이미지 합성: {len(composed)}개")
             except TypeError:
@@ -2962,6 +3008,8 @@ async def _process_entry(
         gemini_img_url = ""
         if entry.single_mode:
             log_(f"[{entry.uid[:6]}] [단일등록] Gemini 판매멘트 스킵")
+        elif getattr(entry, "skip_gemini_detail", False):
+            log_(f"[{entry.uid[:6]}] 🚫 Gemini 판매멘트 스킵 (사용자 지정) — 상세이미지 그대로 사용")
         elif _gemini_key:
             log_(f"[{entry.uid[:6]}] Gemini 상세페이지 생성 + 이미지 렌더링 중...")
 
@@ -3202,15 +3250,25 @@ async def _process_entry(
                 and not _wt_already
                 and entry.category_id not in _OIL_CATS
             ):
-                # 1순위: Naver JSON 스펙에서 추출
-                _wt_rv, _wt_ru, _wt_rg = _parse_weight_from_json(product.raw_json or {})
-                # 2순위: 상품명 raw 텍스트에서 추출
-                if _wt_rg <= 0:
-                    _wt_rv, _wt_ru, _wt_rg = _parse_weight(product.name)
+                # 용량(ml/L) 정보가 있으면 raw_json 중량(병·포장 무게 포함 가능성) 대신
+                # 용량 기반으로 환산 — 예) 15ml 에센셜오일이 raw_json엔 50g(포장 포함)로 찍히는 문제 방지
+                _vp2_rv, _vp2_ru, _vp2_rl = _parse_volume(product.name)
+                if _vp2_rl == 0:
+                    _vp2_rv, _vp2_ru, _vp2_rl = _parse_volume_from_json(product.raw_json or {})
+                _wt_source = "Gemini 전 직접파싱"
+                if _vp2_rl > 0:
+                    _wt_rv, _wt_ru, _wt_rg = _derive_weight_from_volume(_vp2_rv, _vp2_ru)
+                    _wt_source = f"용량 {_vp2_rv:g}{_vp2_ru} 기반 환산, raw_json 중량 미신뢰"
+                else:
+                    # 1순위: Naver JSON 스펙에서 추출
+                    _wt_rv, _wt_ru, _wt_rg = _parse_weight_from_json(product.raw_json or {})
+                    # 2순위: 상품명 raw 텍스트에서 추출
+                    if _wt_rg <= 0:
+                        _wt_rv, _wt_ru, _wt_rg = _parse_weight(product.name)
                 if _wt_rg > 0:
                     _wt_str = f"{_wt_rv:g}{_wt_ru}"
                     extra_options.append(("개당 중량", _wt_str))
-                    log_(f"[{entry.uid[:6]}] 옵션 사전확정 — 개당 중량: {_wt_str} (Gemini 전 직접파싱)")
+                    log_(f"[{entry.uid[:6]}] 옵션 사전확정 — 개당 중량: {_wt_str} ({_wt_source})")
 
             # [3] 사이즈 추출 (인치, cm — TV·가구·의류 등)
             size_m = _re.search(
@@ -3349,61 +3407,44 @@ async def _process_entry(
                     extra_options.append(("개당 용량", _vstr))
                     log_(f"[{entry.uid[:6]}] 개당 용량 보완: {_vstr}")
 
-        # 개당 중량 (식품 등) — required_options에 있을 때만 자동 보완
-        # valid_options에만 있고 required가 아닌 경우(캡슐세제 등) 중량을 옵션에 넣으면 불필요한 중복 옵션 발생
-        _guide_req_wt = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", []) if entry.category_id else []
-        if '개당 중량' in (_guide_valid or []) and '개당 중량' in _guide_req_wt and '개당 중량' not in _existing_types:
+        # 개당 중량 (식품 등) — required_options 또는 택1 그룹(choice_groups) 소속일 때만 자동 보완
+        # valid_options에만 있고 required도 택1도 아닌 경우(캡슐세제 등) 중량을 옵션에 넣으면 불필요한 중복 옵션 발생
+        _cat_cfg_wt = _CAT_OPTIONS.get(entry.category_id, {}) if entry.category_id else {}
+        _guide_req_wt = _cat_cfg_wt.get("required_options", [])
+        _guide_choice_groups_wt = _cat_cfg_wt.get("choice_groups", [])
+        _wt_in_choice_group = any('개당 중량' in g for g in _guide_choice_groups_wt)
+        if '개당 중량' in (_guide_valid or []) and ('개당 중량' in _guide_req_wt or _wt_in_choice_group) and '개당 중량' not in _existing_types:
             _wt2_rv, _wt2_ru, _wt2_rg = _parse_weight(_pname)
-            if _wt2_rg == 0:  # 상품명 실패 → raw_json fallback
-                _wt2_rv, _wt2_ru, _wt2_rg = _parse_weight_from_json(product.raw_json)
-                if _wt2_rg > 0:
-                    log_(f"[{entry.uid[:6]}] 개당 중량 raw_json fallback 성공")
+            if _wt2_rg == 0:  # 상품명 실패 → 용량(ml/L) 정보 우선 (raw_json 중량은 병·포장 무게 포함 가능성)
+                _vp3_rv, _vp3_ru, _vp3_rl = _parse_volume(_pname)
+                if _vp3_rl == 0:
+                    _vp3_rv, _vp3_ru, _vp3_rl = _parse_volume_from_json(product.raw_json)
+                if _vp3_rl > 0:
+                    _wt2_rv, _wt2_ru, _wt2_rg = _derive_weight_from_volume(_vp3_rv, _vp3_ru)
+                    log_(f"[{entry.uid[:6]}] 개당 중량 용량 기반 환산: {_wt2_rv:g}{_wt2_ru} (raw_json 중량 미신뢰)")
+                else:
+                    _wt2_rv, _wt2_ru, _wt2_rg = _parse_weight_from_json(product.raw_json)
+                    if _wt2_rg > 0:
+                        log_(f"[{entry.uid[:6]}] 개당 중량 raw_json fallback 성공")
             if _wt2_rg > 0:
                 _wstr = f"{_wt2_rv:g}{_wt2_ru}"
                 extra_options.append(("개당 중량", _wstr))
                 log_(f"[{entry.uid[:6]}] 개당 중량 보완: {_wstr}")
 
-        # ── g + ml 배타 처리 ──────────────────────────────────────────
-        # 개당 용량(ml)과 개당 중량(g)은 쿠팡에서 배타적 옵션 — 수치 무관하게 하나만 유지
-        # 카테고리 required_options 기준으로 유효한 단위를 선택
-        _vol_val = next((v for t, v in extra_options if t == "개당 용량"), None)
-        _wt_val  = next((v for t, v in extra_options if t == "개당 중량"), None)
-        if _vol_val and _wt_val:
-            _req_opts = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", [])
-            _need_vol = "개당 용량" in _req_opts
-            _need_wt  = "개당 중량" in _req_opts
-            # 액체 판별: 용량 수치 파싱 (≥ 50ml이면 액체 식품으로 간주)
-            try:
-                _vol_num_str = _re.sub(r'[^\d.]', '', _vol_val)
-                _vol_unit_str = _re.sub(r'[\d. ]', '', _vol_val).lower()
-                _vol_ml_val = float(_vol_num_str) * (1000 if _vol_unit_str in ('l',) else 1)
-                _is_liquid = _vol_ml_val >= 50
-            except Exception:
-                _is_liquid = False
-            if _need_vol and not _need_wt:
-                # 액체류 카테고리 — 용량 유지, 중량 제거
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 중량"]
-                log_(f"[{entry.uid[:6]}] 개당 중량 배타 제거 (카테고리 필수: 용량 {_vol_val} 유지)")
-            elif _need_wt and not _need_vol:
-                # 고체류 카테고리 — 중량 유지, 용량 제거
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 용량"]
-                log_(f"[{entry.uid[:6]}] 개당 용량 배타 제거 (카테고리 필수: 중량 {_wt_val} 유지)")
-            elif _need_vol and _need_wt:
-                # 둘 다 required → 둘 다 유지 (배타 처리 없음)
-                log_(f"[{entry.uid[:6]}] 배타 처리 스킵 (개당 중량·개당 용량 둘 다 필수 → 둘 다 유지)")
-            elif not _need_vol and not _need_wt:
-                # required 미지정 — 용량 우선 유지 (기본값)
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 중량"]
-                log_(f"[{entry.uid[:6]}] 개당 중량 배타 제거 (required 미지정, 용량 {_vol_val} 우선)")
+        # ── 택1 그룹 정리 (1차) ────────────────────────────────────────
+        # category_options.json의 choice_groups 기준 — 카테고리/스토어 무관 범용 적용
+        extra_options, _cg_msgs = _resolve_choice_groups(extra_options, entry.category_id)
+        for _m in _cg_msgs:
+            log_(f"[{entry.uid[:6]}] {_m}")
 
-        # 개당 중량 추가 안전망: 카테고리 required_options에 없으면 제거
-        # Gemini가 앞단에서 이미 추가했더라도 required가 아닌 중량 옵션은 Wing 상위노출에 불리
-        _req_opts_wt_chk = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", []) if entry.category_id else []
-        if '개당 중량' not in _req_opts_wt_chk:
+        # 개당 중량 추가 안전망: 카테고리에서 아예 허용 안 되면 제거
+        # (valid_options 기준 — 택1 그룹 소속이면 required_options엔 없어도 허용됨)
+        _valid_opts_wt_chk = _CAT_OPTIONS.get(entry.category_id, {}).get("valid_options", []) if entry.category_id else []
+        if _valid_opts_wt_chk and '개당 중량' not in _valid_opts_wt_chk:
             _wt_extra = [v for t, v in extra_options if t == '개당 중량']
             if _wt_extra:
                 extra_options = [(t, v) for t, v in extra_options if t != '개당 중량']
-                log_(f"[{entry.uid[:6]}] 개당 중량 제거 (카테고리 required 아님: {_wt_extra[0]})")
+                log_(f"[{entry.uid[:6]}] 개당 중량 제거 (카테고리 미허용: {_wt_extra[0]})")
 
         # 색상 (Wing 카테고리 필수이나 실제 색상 없는 상품 — 기본값 삽입)
         # ⚠️ 단, 번들이 여러 개인데 상품명에서 실제 색상 단어를 찾지 못한 경우:
@@ -3443,7 +3484,15 @@ async def _process_entry(
             and entry.category_id
             and _guide_valid
         ):
-            _req_opts_raw = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", [])
+            _cat_cfg_g = _CAT_OPTIONS.get(entry.category_id, {})
+            _req_opts_raw = _cat_cfg_g.get("required_options", [])
+            # 택1 그룹(choice_groups) — 그룹 내 어느 멤버도 아직 안 채워졌으면
+            # 대표로 첫 번째 멤버를 필수 목록에 추가 (Gemini가 시도하도록)
+            _existing_types_g = {t for t, _ in extra_options}
+            for _grp in _cat_cfg_g.get("choice_groups", []):
+                if _grp and not any(m in _existing_types_g for m in _grp):
+                    if _grp[0] not in _req_opts_raw:
+                        _req_opts_raw = _req_opts_raw + [_grp[0]]
             # guide_valid 기준으로 필터 — valid 하지 않은 옵션을 Gemini가 재추가하는 것 방지
             _req_opts_for_gemini = [r for r in _req_opts_raw if not _guide_valid or r in _guide_valid]
             _gemini_key_opt  = getattr(_settings, "GEMINI_API_KEY", "")
@@ -3479,41 +3528,11 @@ async def _process_entry(
                 extra_options.append(("급여포인트", "소형견~대형견 적합"))
                 log_(f"[{entry.uid[:6]}] 급여포인트 기본값 삽입 (Gemini 미응답 폴백)")
 
-        # ── Gemini 후 중량/용량 배타 최종 정리 ────────────────────────────
-        # Gemini가 기존 dedup 이후 중량·용량을 재추가하는 경우를 잡기 위한 2차 필터
-        _WT_TYPES = {"개당 중량", "중량", "무게", "순중량", "최소 중량"}
-        _VL_TYPES = {"개당 용량", "용량", "내용량", "최소 용량"}
-        _final_vol = next((v for t, v in extra_options if t in _VL_TYPES), None)
-        _final_wt  = next((v for t, v in extra_options if t in _WT_TYPES), None)
-        if _final_vol and _final_wt:
-            _req_f = set(_CAT_OPTIONS.get(entry.category_id, {}).get("required_options", [])) if entry.category_id else set()
-            _need_vol_f = bool(_req_f & _VL_TYPES)
-            _need_wt_f  = bool(_req_f & _WT_TYPES)
-            # 용량 수치 파싱 — 50ml 이상이면 액체로 간주
-            try:
-                _vn = float(_re.sub(r'[^\d.]', '', _final_vol) or "0")
-                _vu = _re.sub(r'[\d. ]', '', _final_vol).lower()
-                _vml_f = _vn * 1000.0 if _vu in ('l',) else _vn
-                _is_liq_f = _vml_f >= 50
-            except Exception:
-                _is_liq_f = False
-            if _need_vol_f and not _need_wt_f:
-                extra_options = [(t, v) for t, v in extra_options if t not in _WT_TYPES]
-                log_(f"[{entry.uid[:6]}] [후처리] 중량 제거 (카테고리 용량 우선: {_final_vol})")
-            elif _need_wt_f and not _need_vol_f:
-                extra_options = [(t, v) for t, v in extra_options if t not in _VL_TYPES]
-                log_(f"[{entry.uid[:6]}] [후처리] 용량 제거 (카테고리 중량 우선: {_final_wt})")
-            elif _need_vol_f and _need_wt_f:
-                # 둘 다 required → 둘 다 유지 (배타 처리 없음)
-                log_(f"[{entry.uid[:6]}] [후처리] 배타 처리 스킵 (개당 중량·개당 용량 둘 다 필수 → 둘 다 유지)")
-            elif _is_liq_f:
-                # 명확한 액체(≥50ml) → 용량 유지, 중량 제거
-                extra_options = [(t, v) for t, v in extra_options if t not in _WT_TYPES]
-                log_(f"[{entry.uid[:6]}] [후처리] 중량 제거 (액체 ≥50ml — 용량 {_final_vol} 우선)")
-            else:
-                # 소용량(≤49ml) 또는 g 단위 → 고체 추정 → 중량 유지, 용량 제거
-                extra_options = [(t, v) for t, v in extra_options if t not in _VL_TYPES]
-                log_(f"[{entry.uid[:6]}] [후처리] 용량 제거 (고체 추정 — 중량 {_final_wt} 우선)")
+        # ── 택1 그룹 정리 (2차) ────────────────────────────────────────
+        # Gemini가 dedup 이후 재추가하는 경우를 잡기 위한 2차 필터
+        extra_options, _cg_msgs2 = _resolve_choice_groups(extra_options, entry.category_id)
+        for _m in _cg_msgs2:
+            log_(f"[{entry.uid[:6]}] [후처리] {_m}")
 
         # ── 수량 옵션 허용 여부 확인 ──────────────────────────────────────
         # 카테고리 가이드에 '수량'이 없으면 수량 슬롯 생략 → extra_options[0]부터 슬롯0 사용
@@ -3555,10 +3574,65 @@ async def _process_entry(
         # "W-20"만 잘못 추출되는 것 방지(엔진오일 GTIN/MPN 형식 오류 원인이었음)
         # \d{4,6}-[A-Z0-9]{3,7}: 부품번호 형식(현대모비스 05100-00461, 97133-G6000
         # 등 숫자-숫자/숫자-영숫자 혼합) 지원 — 하이픈 뒤 일부만 잘리는 것 방지
-        _model_match = _re.search(
+        # SPF15/SPF30 등 자외선차단지수는 모델번호가 아니므로 후보에서 제외
+        # (화장품 GTIN/MPN "형식이 올바르지 않습니다" 오류 원인이었음 — 2026-08-06 확인)
+        _MODEL_FALSE_POSITIVE_PREFIXES = ("SPF",)
+        _extracted_model = ""
+        for _mm in _re.finditer(
             r'(?<!\d)[A-Z]{1,4}-?\d{2,6}[A-Z0-9]*|\d{4,6}-[A-Z0-9]{3,7}', product.name
-        )
-        _extracted_model = _model_match.group(0) if _model_match else ""
+        ):
+            _mval = _mm.group(0)
+            if _mval.upper().startswith(_MODEL_FALSE_POSITIVE_PREFIXES):
+                continue
+            _extracted_model = _mval
+            break
+
+        # 상품명에서 모델번호를 못 찾으면 Gemini 웹검색으로 제조사 공식 품번 시도
+        # — 네이버 상품ID 등 브랜드와 무관한 임의 대체값(예: "NV-8727215157")은 진짜
+        # 제조사 품번이 아니라서 Wing 형식검증에서 거부됨 (2026-08-06 실사용 확인).
+        # 뉴스킨 실제 품번(예: 18110354)은 순수 숫자 8자리 형태이며 정상 등록 확인됨
+        # — 숫자 여부가 아니라 "진짜 제조사 품번인가"가 관건.
+        # 뉴스킨/메리케이 같은 대기업 직판 브랜드는 공식 홈페이지·유통사 사이트에
+        # 품번(Item Number)을 공개하는 경우가 많아 바코드보다 검색 성공률이 높음.
+        if not _extracted_model:
+            _gk_model = getattr(_settings, "GEMINI_API_KEY", "")
+            if _gk_model:
+                # 검색 기반 응답이라 매번 결과가 같지 않음 — "없음" 응답 시 1회 재시도
+                # (2026-08-06 확인: 같은 상품을 ChatGPT는 찾아냈는데 1차 시도만으론 놓친 사례 있었음)
+                for _model_attempt in range(2):
+                    _tag = "(재시도) " if _model_attempt else ""
+                    try:
+                        import google.genai as _genai_model
+                        import google.genai.types as _gtypes_model
+                        _gcli_model = _genai_model.Client(api_key=_gk_model)
+                        _model_prompt = (
+                            f"상품명: {product.name}\n"
+                            f"브랜드: {entry.brand or ''}\n"
+                            "위 제품의 제조사 또는 브랜드가 공식적으로 부여한 품번"
+                            "(모델번호, Item Number, Product Code, Part Number)을 "
+                            "인터넷에서 검색해 찾아주세요.\n"
+                            "찾은 품번 문자열만 답하세요 (설명 없이).\n"
+                            "검색해도 확실한 품번을 찾을 수 없으면 '없음'이라고만 답하세요."
+                        )
+                        _gr_model = _gcli_model.models.generate_content(
+                            model=getattr(_settings, "GEMINI_MODEL", "gemini-2.5-flash"),
+                            contents=[_gtypes_model.Part.from_text(text=_model_prompt)],
+                            config=_gtypes_model.GenerateContentConfig(
+                                tools=[_gtypes_model.Tool(
+                                    google_search=_gtypes_model.GoogleSearch()
+                                )]
+                            ),
+                        )
+                        _model_raw = (_gr_model.text or "").strip().split("\n")[0].strip()
+                        if _model_raw and "없음" not in _model_raw and 0 < len(_model_raw) <= 40:
+                            _extracted_model = _model_raw
+                            log_(f"[{entry.uid[:6]}] ✅ {_tag}모델번호 Gemini 검색 성공: {_extracted_model}")
+                            break
+                        log_(f"[{entry.uid[:6]}] {_tag}모델번호 Gemini 검색 실패 (응답: {_model_raw[:40]!r})")
+                    except Exception as _ge_model:
+                        log_(f"[{entry.uid[:6]}] {_tag}모델번호 Gemini 검색 오류: {_ge_model}")
+                if not _extracted_model:
+                    log_(f"[{entry.uid[:6]}] 모델번호 Gemini 검색 최종 실패 — 공란")
 
         # 수량 옵션 불허 카테고리: 모델명/품번이 필수 옵션이면 모델번호를 extra_options에 추가
         if not _qty_as_option and _guide_valid:
@@ -3568,6 +3642,17 @@ async def _process_entry(
                 _opt_val = _extracted_model or entry.brand or product.name[:20]
                 extra_options.insert(0, (_first_opt, _opt_val))
                 log_(f"[{entry.uid[:6]}] 수량 옵션 불허 카테고리 → {_first_opt}={_opt_val} 슬롯0 배치")
+
+        # "개당 수량"(캡슐/정/포 등 낱개 수) — 상품명에 이미 적혀있는 경우가 많아
+        # Gemini 범용 폴백보다 정규식 우선 추출 (예: "12캡슐", "16개입" 등)
+        # 단위 표기(개/매/개입)는 추후 정교화 예정 — 우선 "개"로 통일
+        if _guide_valid and "개당 수량" in _guide_valid:
+            if not any(t == "개당 수량" for t, _ in extra_options):
+                _cnt_match = _re.search(r'(\d+)\s*(?:캡슐|정|포|개입|매)', product.name)
+                if _cnt_match:
+                    _cnt_val = f"{_cnt_match.group(1)}개"
+                    extra_options.append(("개당 수량", _cnt_val))
+                    log_(f"[{entry.uid[:6]}] 옵션 자동추출 — 개당 수량: {_cnt_val} (상품명 패턴)")
 
         # ── Gemini 옵션 값 폴백 ──────────────────────────────────────────
         # _guide_valid에 필요한 옵션 유형이 있는데 extra_options에 없는 경우 Gemini로 값 추출
@@ -3661,41 +3746,19 @@ async def _process_entry(
                             _existing_types_final.add(_mt)
                             log_(f"[{entry.uid[:6]}] ↩ 고정값 복원 (Gemini 실패 폴백): {_mt}={_rv}")
 
-        # ── 최종 배타 필터 (이중 안전장치) ──────────────────────────────
-        # Gemini가 g+ml 둘 다 추가했을 경우를 대비해 등록 직전 한 번 더 배타 처리
-        _final_vol = next((v for t, v in extra_options if t == "개당 용량"), None)
-        _final_wt  = next((v for t, v in extra_options if t == "개당 중량"), None)
-        if _final_vol and _final_wt:
-            _freq = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", [])
-            _fneed_vol = "개당 용량" in _freq
-            _fneed_wt  = "개당 중량" in _freq
-            try:
-                _fvn = _re.sub(r'[^\d.]', '', _final_vol)
-                _fvu = _re.sub(r'[\d. ]', '', _final_vol).lower()
-                _fvml = float(_fvn) * (1000 if _fvu == 'l' else 1)
-                _f_is_liquid = _fvml >= 50
-            except Exception:
-                _f_is_liquid = False
-            if _fneed_vol and not _fneed_wt:
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 중량"]
-                log_(f"[{entry.uid[:6]}] 최종 배타 필터: 개당 중량 제거 (카테고리 필수: 용량 우선)")
-            elif _fneed_wt and not _fneed_vol:
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 용량"]
-                log_(f"[{entry.uid[:6]}] 최종 배타 필터: 개당 용량 제거 (카테고리 필수: 중량 우선)")
-            elif _fneed_vol and _fneed_wt and _f_is_liquid:
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 중량"]
-                log_(f"[{entry.uid[:6]}] 최종 배타 필터: 개당 중량 제거 (액체 식품 {_final_vol} ≥ 50ml)")
-            elif not _fneed_vol and not _fneed_wt:
-                extra_options = [(t, v) for t, v in extra_options if t != "개당 중량"]
-                log_(f"[{entry.uid[:6]}] 최종 배타 필터: 개당 중량 제거 (required 미지정, 용량 우선)")
+        # ── 택1 그룹 정리 (최종, 이중 안전장치) ──────────────────────────
+        extra_options, _cg_msgs3 = _resolve_choice_groups(extra_options, entry.category_id)
+        for _m in _cg_msgs3:
+            log_(f"[{entry.uid[:6]}] 최종 {_m}")
 
-        # 최종 안전망: 개당 중량이 required_options에 없으면 마지막으로 한 번 더 제거
-        _final_req_wt = _CAT_OPTIONS.get(entry.category_id, {}).get("required_options", []) if entry.category_id else []
-        if '개당 중량' not in _final_req_wt:
+        # 최종 안전망: 개당 중량이 카테고리에서 아예 허용 안 되면 제거
+        # (valid_options 기준 — 택1 그룹 소속이면 required_options엔 없어도 허용됨)
+        _final_valid = _CAT_OPTIONS.get(entry.category_id, {}).get("valid_options", []) if entry.category_id else []
+        if _final_valid and '개당 중량' not in _final_valid:
             _last_wt = [v for t, v in extra_options if t == '개당 중량']
             if _last_wt:
                 extra_options = [(t, v) for t, v in extra_options if t != '개당 중량']
-                log_(f"[{entry.uid[:6]}] 최종 안전망: 개당 중량 제거 (required 아님, {_last_wt[0]})")
+                log_(f"[{entry.uid[:6]}] 최종 안전망: 개당 중량 제거 (카테고리 미허용, {_last_wt[0]})")
 
         if extra_options:
             log_(f"[{entry.uid[:6]}] 최종 추가옵션 {len(extra_options)}개: "
@@ -3785,16 +3848,47 @@ async def _process_entry(
                                 _op = (
                                     f"상품명: {product.name}\n\n"
                                     f"다음 옵션 유형의 값을 추출하세요: {', '.join(_fmissing)}\n"
-                                    "형식: 옵션유형=값 (줄바꿈 구분)\n설명 금지."
+                                    "형식: 옵션유형=값 (줄바꿈 구분)\n"
+                                    "값은 반드시 숫자+단위 형식으로 (예: 개당 중량=112g, 개당 용량=295ml).\n"
+                                    "정확한 값을 모르면 그 줄을 아예 쓰지 마세요 "
+                                    "('정보 없음', '알 수 없음' 같은 문구 절대 금지).\n설명 금지."
                                 )
                                 _or = await loop.run_in_executor(None, lambda: _gcli_fix.generate_content(_op))
+                                _fb_wt_kw = {"개당 중량", "최소 중량", "중량", "무게", "순중량"}
+                                _fb_vl_kw = {"개당 용량", "최소 용량", "용량", "내용량"}
+                                _fb_wt_re = _re.compile(r'(\d+(?:\.\d+)?)\s*(g|kg)', _re.I)
+                                _fb_vl_re = _re.compile(r'(\d+(?:\.\d+)?)\s*(ml|mL|l|L|cc)', _re.I)
+                                _fb_bad_vals = {
+                                    "없음", "null", "none", "unknown", "알수없음", "모름",
+                                    "알 수 없음", "불명", "미상", "n/a", "-", "해당없음", "정보 없음",
+                                }
                                 for _ol in (_or.text or "").strip().splitlines():
                                     if "=" in _ol:
                                         _ot, _, _ov = _ol.partition("=")
                                         _ot, _ov = _ot.strip(), _ov.strip()
-                                        if _ot in _fmissing and _ov:
-                                            extra_options.append((_ot, _ov))
-                                            log_(f"[{entry.uid[:6]}] ✅ 옵션 재보완: {_ot}={_ov}")
+                                        if not (_ot in _fmissing and _ov):
+                                            continue
+                                        if _ov.lower() in _fb_bad_vals:
+                                            log_(f"[{entry.uid[:6]}] ⚠ 옵션 재보완 무시 (빈값/모름): {_ot}={_ov}")
+                                            continue
+                                        if _ot in _fb_wt_kw:
+                                            _m = _fb_wt_re.search(_ov)
+                                            if not _m:
+                                                log_(f"[{entry.uid[:6]}] ⚠ 옵션 재보완 무시 (중량 단위 없음): {_ot}={_ov}")
+                                                continue
+                                            _ov = f"{_m.group(1)}{_m.group(2).lower()}"
+                                        elif _ot in _fb_vl_kw:
+                                            _m = _fb_vl_re.search(_ov)
+                                            if not _m:
+                                                log_(f"[{entry.uid[:6]}] ⚠ 옵션 재보완 무시 (용량 단위 없음): {_ot}={_ov}")
+                                                continue
+                                            _ov = f"{_m.group(1)}{_m.group(2).lower()}"
+                                        extra_options.append((_ot, _ov))
+                                        log_(f"[{entry.uid[:6]}] ✅ 옵션 재보완: {_ot}={_ov}")
+                            # 재보완 과정에서 택1 그룹 양쪽이 다 채워졌을 수 있음 — 정리
+                            extra_options, _cg_msgs4 = _resolve_choice_groups(extra_options, entry.category_id)
+                            for _m in _cg_msgs4:
+                                log_(f"[{entry.uid[:6]}] [전수보완 후] {_m}")
 
                     # ⑤ gosisi_cat 보정 — category_options.json 우선, 없으면 Gemini
                     if entry.category_id:
@@ -3864,7 +3958,7 @@ async def _process_entry(
             lead_time=entry.lead_time,  # 국내 3일 / 해외 10일 (처리 후 전환 가능)
             qty_as_option=_qty_as_option,
             qty_option_type=_qty_option_type,  # "수량" or "총 수량" 등 카테고리별 정확한 이름
-            model_number=_extracted_model,  # 상품명에서 추출한 모델번호 (모델번호 컬럼 기입)
+            model_number=_extracted_model,  # 상품명 추출 모델번호, 없으면 Gemini 검색 품번 (모델번호 컬럼 기입)
         )
         log_(f"[{entry.uid[:6]}] ✅ 완료: {product_name_50}")
 
@@ -3991,7 +4085,7 @@ def _save_collection_history(
                 "bundle_unit":       getattr(e, "bundle_unit", 0),
                 "custom_image_path": getattr(e, "custom_image_path", ""),
                 "badge_unit":        getattr(e, "badge_unit", "개"),
-                "ai_bg_regen":       getattr(e, "ai_bg_regen", False),
+                "skip_gemini_detail": getattr(e, "skip_gemini_detail", False),
                 "detail_ref_images": list(getattr(e, "detail_ref_images", None) or []),
                 "detail_ref_text":   getattr(e, "detail_ref_text", ""),
             })
@@ -4030,6 +4124,13 @@ def _save_collection_history(
             "entries":       serialized,
         }
 
+        # 동일 URL 집합의 기존 회차가 있으면 교체(최신으로 갱신) — 처리 후
+        # badge_unit 등을 일괄 수정하고 재저장할 때 중복 회차가 쌓이지 않도록 함
+        _cur_urls = {e["url"] for e in serialized if e.get("url")}
+        history = [
+            r for r in history
+            if {ed.get("url") for ed in r.get("entries", [])} != _cur_urls
+        ]
         history.insert(0, run)        # 최신이 맨 앞
         history = history[:_MAX_HISTORY]
         _HISTORY_FILE.write_text(
@@ -4066,7 +4167,7 @@ _QUEUE_SAVE_FIELDS = (
     "manual_options", "lead_time",
     "single_mode", "single_selected_imgs", "margin_override",
     "watch_store", "price_extra", "extra_detail_images", "extra_detail_text",
-    "bundle_unit", "custom_image_path", "badge_unit", "ai_bg_regen",
+    "bundle_unit", "custom_image_path", "badge_unit", "skip_gemini_detail",
     "detail_ref_images", "detail_ref_text",
     "status",  # 복원 시 processing → pending 으로 리셋
 )
@@ -4141,7 +4242,7 @@ def _restore_queue_from_state() -> list[QueueEntry]:
                 bundle_unit         = int(row.get("bundle_unit") or 0),
                 custom_image_path   = row.get("custom_image_path", ""),
                 badge_unit          = row.get("badge_unit") or "개",
-                ai_bg_regen         = bool(row.get("ai_bg_regen", False)),
+                skip_gemini_detail  = bool(row.get("skip_gemini_detail", False)),
                 detail_ref_images   = list(row.get("detail_ref_images") or []),
                 detail_ref_text     = row.get("detail_ref_text", ""),
                 status           = _st,
@@ -5794,7 +5895,8 @@ def _build_detail_page_tab(settings) -> None:
         ).on("click", lambda: None):   # 클릭으로 포커스 유도
             ui.icon("content_paste").classes("text-slate-400 text-sm")
             ui.label(
-                "이 영역 클릭 후 Ctrl+V — 클립보드 이미지가 자동으로 추가됩니다"
+                "이 영역 클릭 후 Ctrl+V — 클립보드 이미지가 자동으로 추가됩니다 "
+                "(이미지 여러 장을 한 번에 복사해서 붙여넣어도 전부 인식됩니다)"
             ).classes("text-xs text-slate-500")
         dp_paste_status = ui.label("").classes("text-xs text-teal-600 mt-1")
 
@@ -6043,6 +6145,15 @@ def _build_detail_page_tab(settings) -> None:
       });
       return;
     }
+
+    // 텍스트 입력창(상품명 등)에 포커스가 있으면 그냥 일반 텍스트 붙여넣기로 둔다.
+    // 네이버 등에서 복사한 텍스트는 text/html이 함께 딸려오는 경우가 많은데,
+    // 아래 ② 처리가 무조건 preventDefault()를 걸어버려서 상품명 입력창에
+    // 직접 붙여넣기가 막히던 버그 수정 (메모장 거쳐서 재복사하면 되던 이유가
+    // 이거 — 메모장은 text/html 없이 순수 텍스트만 복사됨).
+    var active = document.activeElement;
+    var isTextField = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+    if(isTextField) return;
 
     // ② HTML paste — 네이버 JS비활성 후 여러 이미지 선택 복사 시
     for(var i=0; i<items.length; i++){
@@ -6638,7 +6749,7 @@ def page() -> None:
                             with ui.row().classes("items-center gap-2 mt-1"):
                                 ui.label("🏷 대표이미지 배지 단위").classes("text-xs text-slate-400")
                                 badge_unit_select = ui.select(
-                                    ["개", "세트", "박스", "묶음"],
+                                    ["개", "세트", "박스", "묶음", "통"],
                                     value="개",
                                 ).props("dense outlined").style("width:90px")
 
@@ -6798,14 +6909,6 @@ def page() -> None:
                                     nobg_hint.set_text("원본 이미지 그대로 사용 (배경 제거 안 함)")
                             nobg_toggle.on_value_change(_update_nobg_hint)
 
-                            ui.separator().classes("my-2")
-                            ai_bg_toggle = ui.checkbox(
-                                "🎨 AI 배경 재생성 사용 (Gemini)", value=False,
-                            ).props("dense")
-                            ui.label(
-                                "워터마크·공식배지·마트사진 등 누끼 어려운 상품용. "
-                                "상품당 API 비용·시간 추가 발생 — 켜면 이 상품은 누끼 대신 AI가 배경을 새로 생성함."
-                            ).classes("text-xs text-slate-500 mt-1")
                         _s_nobg_body.set_visibility(False)
 
                         with ui.card_section().classes("py-1") as _s_nobg_summary:
@@ -6887,9 +6990,6 @@ def page() -> None:
                                 placeholder="https://smartstore.naver.com/.../products/..."
                             ).props("dense outlined clearable").style("width:100%")
                             with ui.row().classes("gap-2 mt-2 items-center w-full"):
-                                new_brand_input = ui.input(
-                                    placeholder="브랜드 (비워두면 자동추출)",
-                                ).props("dense outlined").style("flex:1")
                                 add_btn = ui.button("추가", icon="add").props("color=blue dense")
 
                             ui.separator().classes("my-2")
@@ -6972,7 +7072,7 @@ def page() -> None:
                                             skipped += 1
                                             continue
                                         _seen_pids.add(_pid)
-                                        brand_val = new_brand_input.value.strip()
+                                        brand_val = ""
 
                                         # 복원 데이터 있으면 우선 사용, 없으면 패널 설정값
                                         if _restore_qtys and u in _restore_qtys:
@@ -7018,7 +7118,6 @@ def page() -> None:
                                             lead_time    = 10 if shipping_mode.value == "overseas" else 2,
                                             watch_store  = _main_store_sel.value or "샵케이",
                                             badge_unit   = badge_unit_select.value or "개",
-                                            ai_bg_regen  = bool(ai_bg_toggle.value),
                                         ))
                                         added += 1
 
@@ -7301,6 +7400,34 @@ def page() -> None:
                             ui.button("📎 전체 추가이미지", icon="add_photo_alternate",
                                 on_click=_bulk_extra_dlg.open,
                             ).props("color=teal outline size=md")
+                            with ui.row().classes("items-center gap-1"):
+                                _bulk_unit_select = ui.select(
+                                    ["개", "세트", "박스", "묶음", "통"],
+                                    value="개",
+                                ).props("dense outlined").style("width:80px").tooltip(
+                                    "대표이미지 배지 단위 — 완료된 항목 포함, 큐 전체에 적용"
+                                )
+                                def _bulk_unit_apply():
+                                    _unit = _bulk_unit_select.value or "개"
+                                    for _e in queue:
+                                        _e.badge_unit = _unit
+                                    _render_queue()
+                                    try:
+                                        _save_collection_history(
+                                            list(queue),
+                                            shipping_mode=shipping_mode.value,
+                                            margin_rate=float(margin_rate_input.value or 1.35),
+                                        )
+                                    except Exception:
+                                        pass
+                                    ui.notify(
+                                        f"🏷 전체 {len(queue)}개 항목 배지 단위 → '{_unit}' 적용됨 "
+                                        "(이미 생성된 대표이미지 자체는 재수집해야 반영됩니다)",
+                                        type="positive", timeout=4000,
+                                    )
+                                ui.button("🏷 전체 단위 적용", on_click=_bulk_unit_apply).props(
+                                    "color=purple outline size=md"
+                                ).tooltip("큐의 모든 항목(완료 포함) 배지 단위를 한 번에 변경")
                             progress_lbl = ui.label("").classes("text-sm text-slate-400 flex-1")
                             error_nav_row = ui.row().classes("gap-1 items-center")
                             error_nav_row.set_visibility(False)
@@ -7884,7 +8011,7 @@ def page() -> None:
                                     else ""
                                 ),  # 파일이 실제로 존재할 때만 복원 (삭제됐거나 없으면 네이버 원본 사용)
                                 badge_unit          = _ed.get("badge_unit") or "개",
-                                ai_bg_regen         = bool(_ed.get("ai_bg_regen", False)),
+                                skip_gemini_detail  = bool(_ed.get("skip_gemini_detail", False)),
                                 detail_ref_images   = list(_ed.get("detail_ref_images") or []),
                                 detail_ref_text     = _ed.get("detail_ref_text", ""),
                             )
@@ -8351,17 +8478,18 @@ def page() -> None:
                                     _make_nobg_handler()
                                 )
 
-                                def _make_ai_bg_handler(e_ref=entry):
+                                def _make_skip_gemini_handler(e_ref=entry):
                                     def _h(ev):
-                                        e_ref.ai_bg_regen = (ev.value == "on")
+                                        e_ref.skip_gemini_detail = (ev.value == "off")
                                     return _h
                                 ui.toggle(
-                                    {"on": "🎨 AI배경 ON", "off": "AI배경 OFF"},
-                                    value="on" if getattr(entry, "ai_bg_regen", False) else "off",
+                                    {"on": "✨ 판매멘트 ON", "off": "🚫 판매멘트 OFF"},
+                                    value="off" if entry.skip_gemini_detail else "on",
                                 ).props("dense").classes("text-xs").tooltip(
-                                    "켜면 이 상품은 누끼 대신 Gemini AI가 배경을 새로 생성 (워터마크/공식배지 제거 포함)"
+                                    "OFF로 끄면 Gemini 판매멘트 생성을 건너뛰고 상세이미지를 그대로 사용 "
+                                    "(직접 만든 상세이미지가 있을 때 유용)"
                                 ).on_value_change(
-                                    _make_ai_bg_handler()
+                                    _make_skip_gemini_handler()
                                 )
 
                             _uid = entry.uid
@@ -8529,37 +8657,38 @@ def page() -> None:
       var items=cd.items||[];
       // blobs를 미리 동기적으로 추출 (이벤트 핸들러 종료 후 items 무효화 대비)
       var blobs=[];
-      var hasHtml=false;
+      var htmlItem=null;
       for(var i=0;i<items.length;i++){{
-        if(items[i].type==="text/html"){{ hasHtml=true; }}
+        if(items[i].type==="text/html"){{ htmlItem=items[i]; }}
         if(items[i].type&&items[i].type.startsWith("image/")){{
           var b=items[i].getAsFile();
           if(b)blobs.push(b);
         }}
       }}
-      if(hasHtml){{
-        // ① HTML 우선 — JS비활성화 후 네이버 다중 이미지 선택 복사
-        for(var i=0;i<items.length;i++){{
-          if(items[i].type==="text/html"){{
-            e.preventDefault();
-            (function(capturedBlobs){{
-              items[i].getAsString(function(html){{
-                var doc=new DOMParser().parseFromString(html,"text/html");
-                var imgs=Array.from(doc.querySelectorAll("img"));
-                var srcs=imgs.map(function(img){{return img.src||img.getAttribute("src")||"";}})
-                             .filter(function(s){{return s.startsWith("http");}});
-                if(srcs.length>0){{
-                  srcs.forEach(function(src,idx){{uploadUrl(src,idx,srcs.length);}});
-                }} else if(capturedBlobs.length>0){{
-                  capturedBlobs.forEach(function(bl,idx){{uploadBlob(bl,idx,capturedBlobs.length);}});
-                }}
-              }});
-            }})(blobs);
-            return;
-          }}
-        }}
+      if(htmlItem){{
+        e.preventDefault();
+        (function(capturedBlobs,capturedItem){{
+          capturedItem.getAsString(function(html){{
+            var doc=new DOMParser().parseFromString(html,"text/html");
+            var imgs=Array.from(doc.querySelectorAll("img"));
+            var srcs=imgs.map(function(img){{return img.src||img.getAttribute("src")||"";}})
+                         .filter(function(s){{return s.startsWith("http");}});
+            if(srcs.length>capturedBlobs.length){{
+              // HTML 쪽 이미지 개수가 blob보다 많을 때만 URL 경로 사용
+              // (예: JS비활성화 후 네이버 다중 이미지 선택 복사 — blob 없이 HTML만 옴)
+              srcs.forEach(function(src,idx){{uploadUrl(src,idx,srcs.length);}});
+            }} else if(capturedBlobs.length>0){{
+              // 단일 이미지 복사(ChatGPT 등)는 blob이 훨씬 신뢰도 높음 —
+              // HTML의 <img src>가 발급처 전용 서명 URL이라 서버에서 못 받아오는 경우가 많음
+              capturedBlobs.forEach(function(bl,idx){{uploadBlob(bl,idx,capturedBlobs.length);}});
+            }} else if(srcs.length>0){{
+              srcs.forEach(function(src,idx){{uploadUrl(src,idx,srcs.length);}});
+            }}
+          }});
+        }})(blobs,htmlItem);
+        return;
       }}
-      // ② binary blobs — 로컬 파일 복사 또는 단일 이미지
+      // binary blobs만 있는 경우 (HTML 없이 로컬 파일 복사 등)
       if(blobs.length>0){{
         e.preventDefault();
         blobs.forEach(function(bl,idx){{uploadBlob(bl,idx,blobs.length);}});
@@ -8794,34 +8923,32 @@ def page() -> None:
       if(!cd)return;
       var items=cd.items||[];
       var blobs=[];
-      var hasHtml=false;
+      var htmlItem=null;
       for(var i=0;i<items.length;i++){{
-        if(items[i].type==="text/html"){{ hasHtml=true; }}
+        if(items[i].type==="text/html"){{ htmlItem=items[i]; }}
         if(items[i].type&&items[i].type.startsWith("image/")){{
           var b=items[i].getAsFile();
           if(b)blobs.push(b);
         }}
       }}
-      if(hasHtml){{
-        for(var i=0;i<items.length;i++){{
-          if(items[i].type==="text/html"){{
-            e.preventDefault();
-            (function(capturedBlobs){{
-              items[i].getAsString(function(html){{
-                var doc=new DOMParser().parseFromString(html,"text/html");
-                var imgs=Array.from(doc.querySelectorAll("img"));
-                var srcs=imgs.map(function(img){{return img.src||img.getAttribute("src")||"";}})
-                             .filter(function(s){{return s.startsWith("http");}});
-                if(srcs.length>0){{
-                  srcs.forEach(function(src,idx){{uploadUrl(src,idx,srcs.length);}});
-                }} else if(capturedBlobs.length>0){{
-                  capturedBlobs.forEach(function(bl,idx){{uploadBlob(bl,idx,capturedBlobs.length);}});
-                }}
-              }});
-            }})(blobs);
-            return;
-          }}
-        }}
+      if(htmlItem){{
+        e.preventDefault();
+        (function(capturedBlobs,capturedItem){{
+          capturedItem.getAsString(function(html){{
+            var doc=new DOMParser().parseFromString(html,"text/html");
+            var imgs=Array.from(doc.querySelectorAll("img"));
+            var srcs=imgs.map(function(img){{return img.src||img.getAttribute("src")||"";}})
+                         .filter(function(s){{return s.startsWith("http");}});
+            if(srcs.length>capturedBlobs.length){{
+              srcs.forEach(function(src,idx){{uploadUrl(src,idx,srcs.length);}});
+            }} else if(capturedBlobs.length>0){{
+              capturedBlobs.forEach(function(bl,idx){{uploadBlob(bl,idx,capturedBlobs.length);}});
+            }} else if(srcs.length>0){{
+              srcs.forEach(function(src,idx){{uploadUrl(src,idx,srcs.length);}});
+            }}
+          }});
+        }})(blobs,htmlItem);
+        return;
       }}
       if(blobs.length>0){{
         e.preventDefault();
@@ -9207,7 +9334,7 @@ def page() -> None:
                             with ui.row().classes("items-center gap-1 mt-1"):
                                 ui.icon("local_shipping", size="xs", color="amber")
                                 ui.label(
-                                    f"최저 판매가 ({_min_qty}개): {_min_price:,}원"
+                                    f"최저 판매가 ({_min_qty}{getattr(entry, 'badge_unit', '개') or '개'}): {_min_price:,}원"
                                 ).classes("text-xs font-bold text-amber-400")
                                 ui.label(
                                     "← Wing 초도+반품 배송비 합계가 이 금액 미만이어야 등록 가능"
@@ -9630,6 +9757,7 @@ def page() -> None:
                         if entry.status in ("done", "error"):
                             _orig_min = entry.min_qty or 1
                             _orig_qty = max(entry.qtys) if entry.qtys else 1
+                            _card_unit = getattr(entry, "badge_unit", "개") or "개"
                             with ui.row().classes("items-center gap-1 mt-1 flex-wrap"):
                                 ui.label("📦").classes("text-sm mt-4")
                                 with ui.column().classes("gap-0 items-center"):
@@ -9643,7 +9771,7 @@ def page() -> None:
                                         ).props("dense outlined color=yellow").style(
                                             "width:70px; font-weight:700;"
                                         ).tooltip("최솟값 (시작 묶음 수량)")
-                                        ui.label("개~").classes("text-sm font-bold text-white")
+                                        ui.label(f"{_card_unit}~").classes("text-sm font-bold text-white")
                                 with ui.column().classes("gap-0 items-center"):
                                     ui.label("최대 수량").classes(
                                         "text-xs font-bold text-sky-500 tracking-tight"
@@ -9655,7 +9783,7 @@ def page() -> None:
                                         ).props("dense outlined color=light-blue").style(
                                             "width:70px; font-weight:700;"
                                         ).tooltip("최댓값 (최대 묶음 수량)")
-                                        ui.label("개").classes("text-sm font-bold text-white")
+                                        ui.label(_card_unit).classes("text-sm font-bold text-white")
 
                                 def _make_reprocess_handler(e_ref=entry, mn_inp=_r_min_inp, mx_inp=_r_qty_inp):
                                     async def _h():
@@ -9772,7 +9900,7 @@ def page() -> None:
                                             with ui.row().classes("items-center gap-2"):
                                                 ui.label("🏷 배지 단위").classes("text-xs text-slate-400")
                                                 _dlg_unit = ui.select(
-                                                    ["개", "세트", "박스", "묶음"],
+                                                    ["개", "세트", "박스", "묶음", "통"],
                                                     value=getattr(e_ref, "badge_unit", "개") or "개",
                                                 ).props("dense outlined").style("width:90px")
                                             _dlg_mode = ui.toggle(
@@ -9906,7 +10034,7 @@ def page() -> None:
                                 _vunit_inp = ui.select(
                                     ["L", "ml", "cc", "kg", "g"],
                                     value=_vunit_safe,
-                                ).props("dense outlined").style("width:60px")
+                                ).props("dense outlined").style("width:76px")
                                 if not _show_vol:
                                     _vol_inp.set_visibility(False)
                                     _vunit_inp.set_visibility(False)
@@ -10121,11 +10249,9 @@ def page() -> None:
             lead_time    = 10 if shipping_mode.value == "overseas" else 2,
             watch_store  = _main_store_sel.value or "샵케이",
             badge_unit   = badge_unit_select.value or "개",
-            ai_bg_regen  = bool(ai_bg_toggle.value),
         )
         queue.append(entry)
         new_url_input.set_value("")
-        new_brand_input.set_value("")
         _render_queue()
         ui.run_javascript(_DING_JS)
         ui.notify(f"추가됨: {url[:50]}...", type="positive", timeout=2000)
@@ -10151,8 +10277,8 @@ def page() -> None:
         except Exception:
             pass
 
-    add_btn.on_click(lambda: _add_entry(new_url_input.value, new_brand_input.value))
-    new_url_input.on("keydown.enter", lambda: _add_entry(new_url_input.value, new_brand_input.value))
+    add_btn.on_click(lambda: _add_entry(new_url_input.value))
+    new_url_input.on("keydown.enter", lambda: _add_entry(new_url_input.value))
 
     # ══════════════════════════════════════════════════════════════
     # 내부 함수: 전체 처리 실행
@@ -10485,6 +10611,14 @@ def _cleanup_output(max_age_hours: int = 24) -> None:
 
 @_app.on_startup
 async def _on_startup():
+    # 서버 재시작 시 큐 상태 복원 (queue_state.json → _global_queue)
+    # ⚠ 이 호출이 빠져있으면 재시작할 때마다 큐에 쌓아둔 URL이 전부 사라짐
+    if not _global_queue:
+        _restored = _restore_queue_from_state()
+        if _restored:
+            _global_queue.extend(_restored)
+            print(f"[Startup] 큐 복원: {len(_restored)}개 항목 (전부 pending)")
+
     def _check():
         if getattr(_settings, "USE_SOCKS5", False) and _ensure_ssh_tunnel():
             print("[Startup] SSH 터널 연결 성공")

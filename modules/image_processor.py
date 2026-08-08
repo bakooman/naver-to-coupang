@@ -305,13 +305,13 @@ class ImageProcessor:
 
         스타일:
           샵케이        : 흰색 채움 + 검정 테두리 + 검정 글씨 (원형 — "개"일 때만)
-          제니스 트레이딩: 검정 채움 (테두리 없음) + 흰색 글씨 — "개"일 때만 원형.
-                          세트/박스/묶음일 때는 포트와 동일하게 흰색 채움 + 검정
-                          테두리 + 검정 글씨로 전환 (검정 배경은 "개" 전용 정체성).
+          제니스 트레이딩: 흰색 채움 + 검정 테두리 + 검정 글씨 (모서리 둥근 사각형, 항상 —
+                          포트와 동일하게 통일. 예전엔 "개"일 때만 검정 채움 원형이었으나
+                          사용자 요청으로 검정 원형 폐지, 전 단위 포트 스타일로 고정).
           포트          : 흰색 채움 + 검정 테두리 + 검정 글씨 (모서리 둥근 사각형, 항상)
 
           단위가 "개"가 아닐 때(세트/박스/묶음)는 글자수가 많아 원형에 넣으면 잘 안 보여서
-          샵케이/제니스 전부 포트와 동일한 흰색+검정테두리 모서리 둥근 사각형으로 통일.
+          샵케이도 포트와 동일한 흰색+검정테두리 모서리 둥근 사각형으로 전환.
 
         크기 기준 (800×800 캔버스):
           원 지름  ≈ 152 px  (캔버스 단변의 19%)
@@ -333,7 +333,7 @@ class ImageProcessor:
         _is_zenith = (_store == "제니스 트레이딩")
         _is_port   = (_store == "포트")
         _long_unit = (unit != "개")           # 세트/박스/묶음 — 원형엔 좁음
-        _use_rect  = _is_port or _long_unit   # 모서리 둥근 사각형 사용 여부
+        _use_rect  = _is_port or _is_zenith or _long_unit   # 모서리 둥근 사각형 사용 여부
 
         # 사각형일 때 가로폭 확장 (장문 단위는 더 넉넉하게)
         if _use_rect:
@@ -343,19 +343,9 @@ class ImageProcessor:
         cx = margin + rw // 2
         cy = H - margin - d // 2
 
-        if _is_zenith and not _use_rect:
-            # 검정 채움 원, 테두리 없음 ("개" 전용 — 기존 스타일 유지)
-            draw.ellipse(
-                [cx - d // 2, cy - d // 2,
-                 cx + d // 2, cy + d // 2],
-                fill=(0, 0, 0),
-            )
-            text_color   = (255, 255, 255)
-            stroke_fill  = (255, 255, 255)  # 흰 stroke → 흰 텍스트 두껍게
-            stroke_width = 5
-        elif _use_rect:
+        if _use_rect:
             # 흰색 채움 + 검정 테두리, 모서리 둥근 사각형
-            # (포트 항상 / 장문단위(세트·박스·묶음)는 샵케이·제니스도 이 스타일로 통일)
+            # (포트·제니스는 항상 / 샵케이는 장문단위(세트·박스·묶음)일 때만)
             border_w = max(2, int(d * 0.026))
             draw.rounded_rectangle(
                 [cx - rw // 2, cy - d // 2,
@@ -405,14 +395,10 @@ class ImageProcessor:
         unit_x  = start_x + num_w + gap - unit_bbox[0]
         unit_y  = num_bottom - unit_bbox[3]
 
-        _is_black_fill = _is_zenith and not _use_rect
-        stroke_w_num  = 4 if _is_black_fill else 3
-        stroke_w_unit = 3 if _is_black_fill else 2
-
         draw.text((num_x, num_y), qty_str, fill=text_color, font=num_font,
-                  stroke_width=stroke_w_num, stroke_fill=stroke_fill)
+                  stroke_width=3, stroke_fill=stroke_fill)
         draw.text((unit_x, unit_y), unit_str, fill=text_color, font=unit_font,
-                  stroke_width=stroke_w_unit, stroke_fill=stroke_fill)
+                  stroke_width=2, stroke_fill=stroke_fill)
 
         return image
 

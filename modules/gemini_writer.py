@@ -24,6 +24,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+from modules.banned_keywords import has_banned_keyword
+
 # ── 이모지 렌더링 (PIL 텍스트 렌더러 전용) ──────────────────────────
 # NotoColorEmoji.ttf는 109px 고정 비트맵 strike 1개만 내장되어 있어
 # 본문 폰트 크기(16~21px)로 바로 로드하면 "invalid pixel size" 에러가 남.
@@ -194,14 +196,23 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         # ── 렌더링할 블록 수집 ────────────────────────────────
         # (tag, text) 리스트
         blocks: list[tuple[str, str]] = []
-        TARGET_TAGS = {"h3", "p", "li"}
-        for el in soup.find_all(["h3", "p", "li"]):
+        TARGET_TAGS = {"h3", "h4", "p", "li"}
+        for el in soup.find_all(["h3", "h4", "p", "li"]):
             # 부모 중에 같은 타겟 태그가 있으면 중첩 요소 → 건너뜀
             if any(p.name in TARGET_TAGS for p in el.parents):
                 continue
             text = el.get_text(" ", strip=True)
-            if text:
-                blocks.append((el.name, text))
+            # ZWJ(U+200D) 제거 — _EMOJI_RE가 ZWJ 결합 이모지(예: 🧑‍🦱)를 하나로
+            # 인식 못 해 조각나면서 폭 측정이 깨지고 렌더링이 겹치는 원인이 됨
+            text = text.replace("‍", "")
+            if not text:
+                continue
+            # Gemini가 동일 블록을 연속 중복 출력하는 경우 방어
+            # (동일 태그+텍스트가 바로 이어지면 같은 y좌표에 겹쳐 그려져 텍스트가
+            # 뭉개지는 원인이 됨 — 2026-08-08 실사용 확인)
+            if blocks and blocks[-1] == (el.name, text):
+                continue
+            blocks.append((el.name, text))
 
         if not blocks:
             return None
@@ -210,8 +221,10 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
         PAD_Y     = 28
         LINE_H_P  = 26   # p/li 행 간격
         LINE_H_H3 = 36   # h3 행 간격
+        LINE_H_H4 = 28   # h4 행 간격
         FONT_P    = _font(16)
         FONT_H3   = _font(21, bold=True)
+        FONT_H4   = _font(18, bold=True)
         CHAR_W    = width - PAD_X * 2  # 텍스트 가용 픽셀 폭
 
         # 한글 문자 실제 폭을 PIL로 측정해서 줄바꿈 계산
@@ -278,6 +291,9 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
             if tag == "h3":
                 lines_h3 = _wrap_text(text, FONT_H3, CHAR_W)
                 total_h += len(lines_h3) * LINE_H_H3 + 8 + 14
+            elif tag == "h4":
+                lines_h4 = _wrap_text(text, FONT_H4, CHAR_W)
+                total_h += 12 + len(lines_h4) * LINE_H_H4 + 6 + 10
             else:
                 prefix = "• " if tag == "li" else ""
                 lines_p = _wrap_text(prefix + text, FONT_P, CHAR_W)
@@ -296,6 +312,14 @@ def _html_to_image_bytes(html_body: str, width: int = 780) -> Optional[bytes]:
                     y += LINE_H_H3
                 draw.line([(PAD_X, y), (width - PAD_X, y)], fill=(220, 220, 220), width=2)
                 y += 8 + 14
+            elif tag == "h4":
+                y += 12
+                for line in _wrap_text(text, FONT_H4, CHAR_W):
+                    _draw_mixed_line(PAD_X, y, line, FONT_H4, (30, 64, 175))
+                    y += LINE_H_H4
+                y += 6
+                draw.line([(PAD_X, y), (width - PAD_X, y)], fill=(219, 234, 254), width=2)
+                y += 10
             else:
                 prefix = "• " if tag == "li" else ""
                 for line in _wrap_text(prefix + text, FONT_P, CHAR_W):
@@ -535,6 +559,43 @@ def _generate_text(
                - 경쟁사 제품 직접·간접 비방 금지
                - 비교 기준·근거 없는 타사 대비 우위 표현 금지
 
+            ⑮ 화장품법 — 금지·실증 필요 표현 (식약처 「화장품 표시·광고 관리 지침」 기준)
+               (화장품 카테고리 해당 시 아래 전 항목 반드시 적용 — 이 사업은 제조사·책임
+                판매업자가 아닌 재판매 구조라 실증자료를 확보할 방법이 없으므로, 임상/시험
+                자료가 있어야만 쓸 수 있는 "실증 필요 표현"도 사실상 전면 금지로 취급합니다)
+
+               - 저자극(성), 무자극(성), 피부과/자극/알레르기/첩포 테스트 완료, 논코메도제닉
+               - 질병·의학적 효능 오인: 아토피, 모낭충, 건선, 살균·소독, 해독, 이뇨, 항암,
+                 항진균, 항바이러스, 근육 이완, 통증 경감, 면역 강화, 항알레르기, 찰과상,
+                 기저귀 발진, 여드름 개선/완화/치료, 기미, 주근깨
+               - 피부 관련: 임신선, 튼살, 디톡스(피부 독소 제거), 반흔 제거/완화,
+                 가려움 완화, ○○ 흔적 없애줌, 홍조·홍반 개선, 뾰루지 개선, 피부노화,
+                 셀룰라이트, 붓기 완화, 다크서클 완화, 콜라겐/효소 증가·감소·활성화,
+                 안티에이징, 피부 혈행 개선, 피부장벽 손상 개선, 피지분비 조절,
+                 미세먼지 차단/흡착 방지
+               - 모발 관련: 발모, 육모, 양모, 탈모방지, 모발 성장 촉진, 모발 두께 증가,
+                 속눈썹·눈썹이 자란다, 모발 손상 개선, 빠지는 모발 감소
+               - 생리활성: 혈액순환, 피부재생, 세포재생, 호르몬 분비촉진, 유익균 균형 보호,
+                 질 내 산도 유지, 질염 예방, 땀 발생 억제, 세포 성장/활력/유전자 활성화
+               - 신체 개선: 다이어트, 체중감량, 피하지방 분해, 체형변화, 몸매 개선,
+                 날씬하게, 가슴 탄력/확대, 얼굴 크기 작아짐, 얼굴 윤곽개선, V라인
+               - 인증·기관 오인: 협회 인증, 의료기관, 의사가 개발, 병원 추천, 식약처 허가·
+                 인증받은 제품(기능성 심사·천연유기농 인증 외), 메디슨, 드럭, 코스메슈티컬
+               - 화장품 범위 초과: 무첨가/free, 부작용 전혀 없다, 먹을 수 있다, 명현현상,
+                 지방볼륨생성, 보톡스, 레이저·카복시 시술, 체내 노폐물 제거, 필러,
+                 줄기세포/stem cell
+               - 기능성 미심사 표현: 미백, 화이트닝, 주름(링클)개선, 자외선(UV)차단
+                 — 실제 기능성화장품 심사를 받은 제품이라는 확인이 없으면 사용 금지
+               - 천연/유기농 인증 오인: "천연화장품", "유기농화장품" — 식약처 기준 적합
+                 인증 없이 사용 금지 (원료가 천연이라는 묘사와는 별개로, 완제품을
+                 "천연화장품/유기농화장품"이라 단정하는 표현 금지)
+               - 수치화된 효능 주장: "수분감 30% 개선", "2주 후 피부톤 개선" 등 구체적
+                 수치·기간을 제시하는 효능 표현 금지 (실증자료 필요)
+               - 타 제품 비교: "○○보다 지속력 5배" 등 근거 없는 비교 우위 표현 금지
+               - "민감한 피부에도 안심", "온 가족이 부담 없이" 등 저자극과 같은 취지의
+                 우회 표현도 전부 금지 — 대신 "산뜻한 사용감", "부드럽게 발리는 제형" 등
+                 실증이 필요 없는 사용감 표현으로 대체하세요.
+
             ══════════════════════════════════════════
             [핵심 작성 방향]
             ══════════════════════════════════════════
@@ -580,11 +641,10 @@ def _generate_text(
             - 마크다운 금지, HTML 태그만 사용
             - 전체 1,000자 이상 (풍부하고 설득력 있게)
 
-            [이모티콘 지침]
-            - 각 h3 헤딩 맨 앞에 반드시 관련 이모티콘 1개 포함
+            [이모티콘 지침 — 최소한으로만 사용]
+            - 이모티콘은 전체 문서를 통틀어 h3 헤딩 4개에 각 1개씩, 총 4개까지만 사용하세요.
               예) ☕ 제품 소개 / 🎯 이런 분들께 추천합니다 / 📝 테이스팅 노트 / 🌱 상품 필수 정보
-            - li 항목 끝에 맥락에 맞는 이모티콘 1개 배치 (과하지 않게, 내용당 1개)
-            - 첫 소개 단락 끝에도 분위기에 맞는 이모티콘 1~2개 포함
+            - li 항목이나 p 단락 안에는 이모티콘을 절대 넣지 마세요 (가독성 저하 방지).
 
             [글씨 굵기 지침]
             - 단락(p) 안에서 핵심 특징·성분·용량·브랜드명 등 강조할 단어는 <strong> 태그로 감싸기
@@ -592,7 +652,7 @@ def _generate_text(
 
             [필수 섹션 구조]
             1. 제품 핵심 소개 (h3 + p 1~2단락 — 제품의 정체성과 핵심 매력)
-            2. 이런 분들께 추천합니다 (h3 + ul/li 3~5개 — 추천 대상, 각 항목 끝 이모티콘)
+            2. 이런 분들께 추천합니다 (h3 + ul/li 3~5개 — 추천 대상, 이모티콘 없이 텍스트만)
             3. 카테고리에 맞는 특징 섹션
                예) 커피 → 테이스팅 노트 | 식품 → 원재료 특징 | 뷰티 → 주요 성분·사용감
             4. 상품 필수 정보 (h3 + ul/li — 용량·원산지·포장 등 팩트 정보)
@@ -607,7 +667,42 @@ def _generate_text(
         raw_text = re.sub(r"^```(?:html)?\s*", "", raw_text, flags=re.IGNORECASE)
         raw_text = re.sub(r"\s*```$", "", raw_text)
 
-        return raw_text if len(raw_text) >= 20 else ""
+        if len(raw_text) < 20:
+            return ""
+
+        # ── 금지 키워드 사후검증 — 프롬프트만 믿지 않고 결과물을 직접 스캔 ──
+        # (상품명 파이프라인과 동일한 목록 재사용 — modules/banned_keywords.py)
+        _plain = re.sub(r"<[^>]+>", " ", raw_text)
+        _banned = has_banned_keyword(_plain)
+        if _banned:
+            print(f"[Gemini] ⚠ 판매멘트 금지 키워드 감지: {_banned} → 재작성 재시도")
+            _retry_prompt = (
+                prompt
+                + "\n\n"
+                + "══════════════════════════════════════════\n"
+                + "[재작성 지시 — 이전 결과에서 금지 표현 발견됨]\n"
+                + "══════════════════════════════════════════\n"
+                + f"방금 생성한 결과물에서 다음 금지 표현이 발견되었습니다: {', '.join(_banned)}\n"
+                + "위 모든 규칙(특히 [절대 금지] 섹션)을 다시 한번 엄격히 지키면서, "
+                + "이 표현들을 절대 포함하지 않도록 처음부터 다시 작성하세요."
+            )
+            retry_parts = ref_image_parts + [types.Part.from_text(text=_retry_prompt)]
+            retry_resp = client.models.generate_content(model=model, contents=retry_parts)
+            retry_text = (retry_resp.text or "").strip()
+            retry_text = re.sub(r"^```(?:html)?\s*", "", retry_text, flags=re.IGNORECASE)
+            retry_text = re.sub(r"\s*```$", "", retry_text)
+
+            _retry_plain = re.sub(r"<[^>]+>", " ", retry_text)
+            if len(retry_text) >= 20 and not has_banned_keyword(_retry_plain):
+                print("[Gemini] ✅ 재작성 후 금지 키워드 해소")
+                return retry_text
+
+            # 재시도에도 금지 키워드가 남아있으면 위반 소지가 있는 문구를 그대로
+            # 내보내는 대신 실패 처리 — 호출부가 기본 HTML로 안전하게 폴백함
+            print("[Gemini] ⚠ 재작성 후에도 금지 키워드 잔존 — 안전을 위해 생성 실패 처리")
+            return ""
+
+        return raw_text
 
     except Exception as e:
         print(f"[Gemini] 텍스트 생성 실패: {e}")
@@ -667,6 +762,12 @@ def generate_compliant_product_name(
             - 의료기기 오인: 족저근막염, 목디스크, 거북목, 일자목, 불면증,
               교정, 혈액순환, 코골이 개선, 탈모 방지, 주름 개선, 피부질환 치료 등
             - 인증 없는 표현: FDA 인증, FDA 승인, 특허(출원 중 표기 시) 등
+
+            [화장품법 위반 — 실증자료 없이 사용 시 허위·과장광고]
+            - 저자극(성), 무자극(성), 피부과/자극/알레르기 테스트 완료, 논코메도제닉
+            - 아토피, 여드름, 기미, 주근깨, 홍조, 홍반, 뾰루지, 피부노화, 셀룰라이트,
+              다크서클, 붓기, 안티에이징, 미백, 화이트닝, 주름개선, 탈모방지, 발모
+            - 천연화장품, 유기농화장품 (인증 없이), 줄기세포, 보톡스, 필러, 무첨가/free
 
             ══════════════════════════════════════════
             [정제 규칙]

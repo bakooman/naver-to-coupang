@@ -1157,6 +1157,8 @@ class NaverStoreCrawler:
         _raw_name = _og_title
         if " : " in _raw_name:
             _raw_name = _raw_name.split(" : ")[0].strip()
+        # "[N배송]", "[무료배송]" 등 선두 배송 태그 제거
+        _raw_name = re.sub(r'^(\s*\[[^\[\]]{0,10}배송[^\[\]]{0,10}\])+\s*', '', _raw_name).strip()
 
         if _price_int > 0 and _raw_name:
             print(f"[Parser] meta-tag fallback: name={_raw_name[:40]}  price={_price_int}")
@@ -1523,6 +1525,8 @@ class NaverStoreCrawler:
                 name = str(node[k]).strip()
                 # "+ GIFT", "+ 증정", "+ 사은품" 류 접미어 제거
                 name = re.sub(r'\s*\+\s*(gift|증정|사은품|선물|증정품|기프트)[^\n]*$', '', name, flags=re.IGNORECASE).strip()
+                # "[N배송]", "[무료배송]" 등 선두 배송 태그 제거
+                name = re.sub(r'^(\s*\[[^\[\]]{0,10}배송[^\[\]]{0,10}\])+\s*', '', name).strip()
                 return name
         return "Unknown"
 

@@ -97,6 +97,11 @@ _GOSISI_CAT_MAP: dict[str, str] = {
 _GOSISI_CAT_DEFAULT = "기타 재화"
 _GOSISI_ITEM_VALUE  = "상세페이지 참조"  # 각 보고 항목 공통 기입값
 
+# 바코드 미확보 시 기입값 — Wing 템플릿 hidden 시트(A73:E73)의 공식 드롭다운 옵션 중
+# 하나를 그대로 사용. 완전 공란으로 두면 "GTIN/MPN이 필요하지만 입력되지 않았습니다"
+# 오류로 반려됨 (2026-08-06 뉴스킨/메리케이 34건 중 29건 실패로 확인).
+_NO_BARCODE_REASON = "[바코드없음]제조사에서 바코드를 제공 받지 못함"
+
 
 # ── ExcelBuilder ───────────────────────────────────────────────────
 
@@ -382,14 +387,17 @@ class ExcelBuilder:
         # 자동가격조정 최저가/설정가격: 템플릿에 컬럼 없음 → Wing UI에서 직접 설정
         w("stock",        item.stock)
         w("_lead_time",   item.lead_time)  # 출고리드타임: 국내 3일 / 해외 10일 (per-item)
-        # 바코드(GTIN): 최소 수량 번들 행에만 기입
+        # 바코드(GTIN): 실제 바코드는 최소 수량 번들 행에만 기입
         # — 쿠팡은 묶음별 GTIN이 달라야 하므로 2개·3개 번들에는 실제 바코드가 없음
         # — 동일 GTIN을 여러 행에 쓰면 "중복된 바코드" 오류 발생
+        # 그 외 행(GTIN 미확보 포함)은 Wing 공식 "바코드 없음 사유"를 기입
+        # — 공란으로 두면 "GTIN/MPN 필요" 오류로 반려됨
         _min_qty = min((b.qty for b in item.bundles), default=bundle.qty)
-        if (bundle.qty == _min_qty
-                and item.gtin and item.gtin.isdigit()
-                and 8 <= len(item.gtin) <= 14):
+        _valid_gtin = bool(item.gtin) and item.gtin.isdigit() and 8 <= len(item.gtin) <= 14
+        if bundle.qty == _min_qty and _valid_gtin:
             w("gtin", item.gtin)
+        else:
+            w("gtin", _NO_BARCODE_REASON)
 
         # 반품배송비: 0원으로 고정 — 카테고리별 상한(예: 29,160원) 초과 방지
         # 템플릿 기본값이 상한을 초과하면 Wing 업로드 실패 원인이 됨

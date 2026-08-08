@@ -655,6 +655,16 @@
       "gosisi_cat": "가공식품",
       "priority": 17
     },
+    "크레메소": {
+      "category_id": "58857",
+      "gosisi_cat": "가공식품",
+      "priority": 17
+    },
+    "로이스 초콜릿 감자칩": {
+      "category_id": "59636",
+      "gosisi_cat": "가공식품",
+      "priority": 25
+    },
     "원두커피믹스": {
       "category_id": "72831",
       "gosisi_cat": "가공식품",

@@ -105,6 +105,52 @@ class OverlayConfig:
     style:    str = _DEFAULT_STYLE   # "premium" | "modern" | "playful" | "tech"
 
 
+def overlay_body_text(img: Image.Image, body: str, style: str = _DEFAULT_STYLE) -> Image.Image:
+    """본문 문구만 하단 그라디언트 바 위에 오버레이 (레퍼런스 기반 재구성 전용).
+    제목/라벨은 이미지 생성 모델이 직접 그려 넣고, 문장이 긴 본문만 글자 깨짐
+    없는 PIL 렌더러로 보강할 때 사용."""
+    if not body.strip():
+        return img
+    result = img.copy().convert("RGBA")
+    W, H   = result.size
+    preset = _preset(style)
+    margin = int(W * _MARGIN_PCT)
+    max_w  = W - margin * 2
+    _draw_body_bottom(result, body, W, H, max_w, preset)
+    return result.convert("RGB")
+
+
+def _disclaimer_band(width: int, text: str) -> Image.Image:
+    margin = int(width * 0.06)
+    max_w  = width - margin * 2
+    font   = _load_font(int(width * 0.024))
+    lines  = _wrap_to_width(text, font, max_w)
+    line_h = _line_height(font)
+    pad    = int(width * 0.025)
+    band_h = pad * 2 + len(lines) * line_h
+
+    band = Image.new("RGB", (width, band_h), (240, 240, 240))
+    draw = ImageDraw.Draw(band)
+    y    = pad
+    for line in lines:
+        _draw_centered_line(draw, line, width, y, font, (130, 130, 130, 255))
+        y += line_h
+    return band
+
+
+def append_disclaimer(img: Image.Image, text: str) -> Image.Image:
+    """완성된 상세페이지 맨 위·아래에 작은 회색 안내문구 밴드를 붙임
+    (레퍼런스 기반 재구성 — 제품 이미지가 실제 상품과 다를 수 있음을 고지)."""
+    W    = img.width
+    band = _disclaimer_band(W, text)
+
+    out = Image.new("RGB", (W, band.height * 2 + img.height), (240, 240, 240))
+    out.paste(band, (0, 0))
+    out.paste(img, (0, band.height))
+    out.paste(band, (0, band.height + img.height))
+    return out
+
+
 def apply_overlay(
     img: Image.Image,
     config: OverlayConfig,
